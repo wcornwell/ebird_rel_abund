@@ -196,15 +196,15 @@ predict_species_map <- function(model_fit,
     }
 
     if (!is.null(range_sf) && nrow(range_sf) > 0) {
+      # BirdLife polygons often have near-duplicate vertices that the S2
+      # spherical engine rejects. Disable S2 so GEOS handles the repair.
+      old_s2 <- sf::sf_use_s2()
+      sf::sf_use_s2(FALSE)
       range_sf <- sf::st_make_valid(sf::st_union(
         sf::st_transform(range_sf, 4326)
       ))
-      # Write via GDAL rather than direct sf->terra conversion; GDAL is more
-      # tolerant of near-duplicate vertices common in BirdLife polygons.
-      tmp_gpkg   <- tempfile(fileext = ".gpkg")
-      sf::st_write(range_sf, tmp_gpkg, quiet = TRUE)
-      range_vect <- terra::vect(tmp_gpkg)
-      unlink(tmp_gpkg)
+      sf::sf_use_s2(old_s2)
+      range_vect <- terra::vect(range_sf)
       r_pred <- terra::mask(r_pred, range_vect)
     } else {
       warning("Could not load range for '", species,

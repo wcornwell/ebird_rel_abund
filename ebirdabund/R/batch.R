@@ -92,8 +92,14 @@ estimate_abundance_batch <- function(
   n_sp <- length(species_list)
   n_cores <- min(max(1L, as.integer(n_cores)), parallel::detectCores())
 
+  # grid_res_km may be a vector; each value gets its own subdirectory
+  grid_res_km <- sort(unique(as.numeric(grid_res_km)))
+
   if (!is.null(output_dir)) {
-    dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+    for (res_km in grid_res_km) {
+      dir.create(file.path(output_dir, paste0(res_km, "km")),
+                 showWarnings = FALSE, recursive = TRUE)
+    }
   }
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -104,12 +110,43 @@ estimate_abundance_batch <- function(
     return(sprintf("%dh %02dm %02ds", s %/% 3600L, (s %% 3600L) %/% 60L, s %% 60L))
   }
 
-  save_species <- function(result, species) {
-    if (is.null(output_dir) || inherits(result, "error")) return(invisible(NULL))
-    stem <- file.path(output_dir, safe_name(species))
-    ggplot2::ggsave(paste0(stem, ".png"), result$plot,
-                    width = 10, height = 9, dpi = 150)
-    terra::writeRaster(result$predictions, paste0(stem, ".tif"), overwrite = TRUE)
+  # Fit model once, predict + save at every requested resolution.
+  # Returns a lightweight summary list (no rasters over the socket).
+  run_species <- function(sp, cov) {
+    model_fit <- fit_species_model(
+      polygon        = polygon,
+      ebird_zip      = ebird_zip,
+      sampling_txt   = sampling_txt,
+      species        = sp,
+      cov_stack      = cov,
+      cache_dir      = cache_dir,
+      hex_spacing_km = hex_spacing_km
+    )
+
+    for (res_km in grid_res_km) {
+      pred <- predict_species_map(
+        model_fit        = model_fit,
+        polygon          = polygon,
+        species          = sp,
+        sci_name         = sci_lookup[[sp]],
+        grid_res_km      = res_km,
+        peak_time        = peak_time,
+        use_range        = use_range,
+        botw_path        = botw_path,
+        range_resolution = range_resolution
+      )
+      if (!is.null(output_dir)) {
+        out_dir <- file.path(output_dir, paste0(res_km, "km"))
+        stem    <- file.path(out_dir, safe_name(sp))
+        ggplot2::ggsave(paste0(stem, ".png"), pred$plot,
+                        width = 10, height = 9, dpi = 150)
+        terra::writeRaster(pred$predictions, paste0(stem, ".tif"),
+                           overwrite = TRUE)
+      }
+    }
+
+    list(n_checklists = nrow(model_fit$data),
+         dev_expl     = summary(model_fit$model)$dev.expl)
   }
 
   # Named vector: common_name -> scientific_name (NA if unknown)
@@ -121,21 +158,7 @@ estimate_abundance_batch <- function(
 
   run_one <- function(species, cov) {
     tryCatch(
-      estimate_abundance(
-        polygon          = polygon,
-        ebird_zip        = ebird_zip,
-        sampling_txt     = sampling_txt,
-        species          = species,
-        sci_name         = sci_lookup[[species]],
-        cov_stack        = cov,
-        cache_dir        = cache_dir,
-        grid_res_km      = grid_res_km,
-        hex_spacing_km   = hex_spacing_km,
-        peak_time        = peak_time,
-        use_range        = use_range,
-        botw_path        = botw_path,
-        range_resolution = range_resolution
-      ),
+      run_species(species, cov),
       error = function(e) {
         message(sprintf("  [FAILED] %s: %s", species, conditionMessage(e)))
         e
@@ -153,7 +176,6 @@ estimate_abundance_batch <- function(
   t_batch_start <- proc.time()[["elapsed"]]
 
   results[[1]] <- run_one(species_list[1], cov_stack)
-  save_species(results[[1]], species_list[1])
 
   t_single <- proc.time()[["elapsed"]] - t_batch_start
 
@@ -220,47 +242,18 @@ estimate_abundance_batch <- function(
     c("polygon", "ebird_zip", "sampling_txt", "wrapped_cov",
       "cache_dir", "grid_res_km", "hex_spacing_km", "peak_time",
       "use_range", "botw_path", "range_resolution", "output_dir",
-      "sci_lookup"),
+      "sci_lookup", "run_species"),
     envir = environment()
   )
 
-  # Workers save outputs to disk immediately on completion so progress is
-  # visible in output_dir and survives a crash. Only a lightweight summary
-  # is returned over the socket (no raster serialisation).
+  # Workers fit once and predict at all resolutions, saving to disk immediately.
+  # Only a lightweight summary is returned over the socket (no raster transfer).
   remaining <- parallel::parLapplyLB(
     cl,
     species_list[-1],
     function(sp) {
       cov <- if (!is.null(wrapped_cov)) terra::unwrap(wrapped_cov) else NULL
-      tryCatch(
-        {
-          res <- estimate_abundance(
-            polygon          = polygon,
-            ebird_zip        = ebird_zip,
-            sampling_txt     = sampling_txt,
-            species          = sp,
-            sci_name         = sci_lookup[[sp]],
-            cov_stack        = cov,
-            cache_dir        = cache_dir,
-            grid_res_km      = grid_res_km,
-            hex_spacing_km   = hex_spacing_km,
-            peak_time        = peak_time,
-            use_range        = use_range,
-            botw_path        = botw_path,
-            range_resolution = range_resolution
-          )
-          if (!is.null(output_dir)) {
-            stem <- file.path(output_dir, safe_name(sp))
-            ggplot2::ggsave(paste0(stem, ".png"), res$plot,
-                            width = 10, height = 9, dpi = 150)
-            terra::writeRaster(res$predictions, paste0(stem, ".tif"),
-                               overwrite = TRUE)
-          }
-          list(n_checklists = nrow(res$data),
-               dev_expl     = summary(res$model)$dev.expl)
-        },
-        error = function(e) e
-      )
+      tryCatch(run_species(sp, cov), error = function(e) e)
     }
   )
 
