@@ -57,7 +57,9 @@ fit_gam <- function(df) {
     family   = mgcv::nb(),
     method   = "fREML",
     discrete = TRUE,
-    knots    = time_knots
+    knots    = time_knots,
+    gamma    = 1.4,
+    select   = TRUE
   )
 
   print_predictor_importance(mod)
