@@ -69,10 +69,17 @@ predict_abundance <- function(model, pred_surface, polygon,
     model, newdata = pred_data, type = "link", se.fit = TRUE
   )
 
-  # as.numeric() strips the row-name attributes mgcv attaches to the vector,
-  # which would otherwise confuse terra's type inference.
-  pred_data$abd    <- as.numeric(exp(preds$fit))
-  pred_data$abd_se <- as.numeric(exp(preds$fit) * preds$se.fit)
+  # Cap on the log scale before exponentiating to prevent overflow when the GAM
+  # extrapolates into covariate regions with no training data. The ceiling is
+  # the log of the 99th percentile of observed non-zero counts.
+  obs_cap   <- stats::quantile(
+    train$observation_count[train$observation_count > 0],
+    probs = 0.99, na.rm = TRUE
+  )
+  log_cap   <- log(max(obs_cap, 1))
+  fit_capped       <- pmin(as.numeric(preds$fit), log_cap)
+  pred_data$abd    <- exp(fit_capped)
+  pred_data$abd_se <- exp(fit_capped) * as.numeric(preds$se.fit)
 
   r_abd <- terra::rast(
     data.frame(x = pred_data$longitude, y = pred_data$latitude, z = pred_data$abd),
