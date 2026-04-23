@@ -54,11 +54,21 @@ prepare_covariates <- function(polygon,
   elev     <- terra::resample(terra::crop(elev_raw, ext), lc_layers[[1]])
 
   message("  climate: precipitation and temperature")
-  wc <- geodata::worldclim_tile(lon = mean(bb[c(1, 3)]),
-                                lat = mean(bb[c(2, 4)]),
-                                var = "bio",
-                                res = 2.5,
-                                path = cache_dir)
+  # WorldClim tiles are 30-degree wide; collect all tiles that intersect the
+  # extent (a single-centre lookup silently drops any tile boundary crossing).
+  tile_lon_mins <- seq(floor(bb[1] / 30) * 30, floor(bb[3] / 30) * 30, by = 30)
+  tile_lat_mins <- seq(floor(bb[2] / 30) * 30, floor(bb[4] / 30) * 30, by = 30)
+  wc_tiles <- list()
+  for (tlon in tile_lon_mins) {
+    for (tlat in tile_lat_mins) {
+      wc_tiles[[length(wc_tiles) + 1L]] <- geodata::worldclim_tile(
+        lon  = tlon + 15, lat  = tlat + 15,
+        var  = "bio", res = 2.5, path = cache_dir
+      )
+    }
+  }
+  wc      <- if (length(wc_tiles) == 1L) wc_tiles[[1L]] else
+               do.call(terra::mosaic, wc_tiles)
   wc_crop <- terra::crop(wc, ext)
   # Extract annual precipitation (BIO12) and annual temperature (BIO1)
   # Use indices rather than names — tile resolution suffix varies (30s vs 2.5m)

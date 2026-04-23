@@ -24,6 +24,11 @@
 #' @param hex_spacing_km Hex-cell diameter for spatiotemporal subsampling.
 #'   Default \code{5}.
 #' @param peak_time Optional decimal-hour override for prediction start time.
+#' @param use_range If \code{TRUE} (default), cells outside the eBird species
+#'   range are set to \code{NA}.  See \code{\link{predict_species_map}} for
+#'   details.
+#' @param range_resolution Resolution passed to \code{ebirdst::load_ranges};
+#'   \code{"27km"} (default) or \code{"9km"}.
 #' @param n_cores Number of parallel workers.  Defaults to
 #'   \code{parallel::detectCores() - 1} (minimum 1).
 #' @param output_dir If non-\code{NULL}, each species' abundance map
@@ -67,13 +72,17 @@ estimate_abundance_batch <- function(
     ebird_zip,
     sampling_txt,
     species_list,
-    cov_stack      = NULL,
-    cache_dir      = "ebirdabund_cache",
-    grid_res_km    = 1,
-    hex_spacing_km = 5,
-    peak_time      = NULL,
-    n_cores        = max(1L, parallel::detectCores() - 1L),
-    output_dir     = NULL) {
+    taxonomy         = NULL,
+    cov_stack        = NULL,
+    cache_dir        = "ebirdabund_cache",
+    grid_res_km      = 1,
+    hex_spacing_km   = 5,
+    peak_time        = NULL,
+    use_range        = TRUE,
+    botw_path        = NULL,
+    range_resolution = "27km",
+    n_cores          = max(1L, parallel::detectCores() - 1L),
+    output_dir       = NULL) {
 
   # ── Validation ───────────────────────────────────────────────────────────────
   if (!is.character(species_list) || length(species_list) == 0L) {
@@ -103,18 +112,29 @@ estimate_abundance_batch <- function(
     terra::writeRaster(result$predictions, paste0(stem, ".tif"), overwrite = TRUE)
   }
 
+  # Named vector: common_name -> scientific_name (NA if unknown)
+  sci_lookup <- if (!is.null(taxonomy)) {
+    setNames(taxonomy$scientific_name, taxonomy$common_name)
+  } else {
+    setNames(rep(NA_character_, length(species_list)), species_list)
+  }
+
   run_one <- function(species, cov) {
     tryCatch(
       estimate_abundance(
-        polygon        = polygon,
-        ebird_zip      = ebird_zip,
-        sampling_txt   = sampling_txt,
-        species        = species,
-        cov_stack      = cov,
-        cache_dir      = cache_dir,
-        grid_res_km    = grid_res_km,
-        hex_spacing_km = hex_spacing_km,
-        peak_time      = peak_time
+        polygon          = polygon,
+        ebird_zip        = ebird_zip,
+        sampling_txt     = sampling_txt,
+        species          = species,
+        sci_name         = sci_lookup[[species]],
+        cov_stack        = cov,
+        cache_dir        = cache_dir,
+        grid_res_km      = grid_res_km,
+        hex_spacing_km   = hex_spacing_km,
+        peak_time        = peak_time,
+        use_range        = use_range,
+        botw_path        = botw_path,
+        range_resolution = range_resolution
       ),
       error = function(e) {
         message(sprintf("  [FAILED] %s: %s", species, conditionMessage(e)))
@@ -198,36 +218,56 @@ estimate_abundance_batch <- function(
   parallel::clusterExport(
     cl,
     c("polygon", "ebird_zip", "sampling_txt", "wrapped_cov",
-      "cache_dir", "grid_res_km", "hex_spacing_km", "peak_time"),
+      "cache_dir", "grid_res_km", "hex_spacing_km", "peak_time",
+      "use_range", "botw_path", "range_resolution", "output_dir",
+      "sci_lookup"),
     envir = environment()
   )
 
+  # Workers save outputs to disk immediately on completion so progress is
+  # visible in output_dir and survives a crash. Only a lightweight summary
+  # is returned over the socket (no raster serialisation).
   remaining <- parallel::parLapplyLB(
     cl,
     species_list[-1],
     function(sp) {
       cov <- if (!is.null(wrapped_cov)) terra::unwrap(wrapped_cov) else NULL
       tryCatch(
-        estimate_abundance(
-          polygon        = polygon,
-          ebird_zip      = ebird_zip,
-          sampling_txt   = sampling_txt,
-          species        = sp,
-          cov_stack      = cov,
-          cache_dir      = cache_dir,
-          grid_res_km    = grid_res_km,
-          hex_spacing_km = hex_spacing_km,
-          peak_time      = peak_time
-        ),
+        {
+          res <- estimate_abundance(
+            polygon          = polygon,
+            ebird_zip        = ebird_zip,
+            sampling_txt     = sampling_txt,
+            species          = sp,
+            sci_name         = sci_lookup[[sp]],
+            cov_stack        = cov,
+            cache_dir        = cache_dir,
+            grid_res_km      = grid_res_km,
+            hex_spacing_km   = hex_spacing_km,
+            peak_time        = peak_time,
+            use_range        = use_range,
+            botw_path        = botw_path,
+            range_resolution = range_resolution
+          )
+          if (!is.null(output_dir)) {
+            stem <- file.path(output_dir, safe_name(sp))
+            ggplot2::ggsave(paste0(stem, ".png"), res$plot,
+                            width = 10, height = 9, dpi = 150)
+            terra::writeRaster(res$predictions, paste0(stem, ".tif"),
+                               overwrite = TRUE)
+          }
+          list(n_checklists = nrow(res$data),
+               dev_expl     = summary(res$model)$dev.expl)
+        },
         error = function(e) e
       )
     }
   )
 
   for (i in seq_along(remaining)) {
-    sp <- species_list[i + 1L]
-    results[[sp]] <- remaining[[i]]
-    save_species(results[[sp]], sp)
+    sp  <- species_list[i + 1L]
+    res <- remaining[[i]]
+    results[[sp]] <- res
   }
 
   # ── Summary ───────────────────────────────────────────────────────────────────

@@ -4,7 +4,6 @@ safe_k <- function(x, default_k) {
   n_uniq <- length(unique(stats::na.omit(x)))
   as.integer(min(default_k, max(3L, n_uniq - 1L)))
 }
-
 # Build a GAM formula with data-driven k for each smooth term.
 build_gam_formula <- function(df, hab_cols) {
   effort_terms <- c(
@@ -30,7 +29,7 @@ build_gam_formula <- function(df, hab_cols) {
 # Fit a negative-binomial GAM to training data.
 # Returns the fitted mgcv::gam object.
 fit_gam <- function(df) {
-  hab_cols <- grep("^(lc_|elevation)", names(df), value = TRUE)
+  hab_cols <- grep("^(lc_|elevation|precip_|temp_)", names(df), value = TRUE)
 
   if (length(hab_cols) == 0) {
     stop("No habitat covariate columns found (expected names starting with 'lc_' or 'elevation').")
@@ -52,7 +51,7 @@ fit_gam <- function(df) {
 
   message("Fitting negative-binomial GAM (", nrow(df), " checklists)...")
 
-  mgcv::bam(
+  mod <- mgcv::bam(
     formula,
     data     = df,
     family   = mgcv::nb(),
@@ -60,4 +59,51 @@ fit_gam <- function(df) {
     discrete = TRUE,
     knots    = time_knots
   )
+
+  print_predictor_importance(mod)
+  mod
+}
+
+# Print a ranked table of predictor importance from a fitted GAM.
+print_predictor_importance <- function(mod) {
+  gam_sum  <- summary(mod)
+  gam_anov <- anova(mod)
+
+  # Smooth terms: EDF and approximate F from summary
+  stbl <- as.data.frame(gam_sum$s.table)
+  rows <- data.frame(
+    term    = rownames(stbl),
+    edf     = stbl$edf,
+    f_stat  = stbl[, "F"],
+    p_value = stbl[, "p-value"],
+    stringsAsFactors = FALSE
+  )
+
+  # Parametric terms: overall F from anova (e.g. protocol_type)
+  if (!is.null(gam_anov$pTerms.table) && nrow(gam_anov$pTerms.table) > 0) {
+    ptbl <- as.data.frame(gam_anov$pTerms.table)
+    prows <- data.frame(
+      term    = rownames(ptbl),
+      edf     = ptbl$df,
+      f_stat  = ptbl$F,
+      p_value = ptbl[, "p-value"],
+      stringsAsFactors = FALSE
+    )
+    rows <- rbind(rows, prows)
+  }
+
+  rows <- rows[order(-rows$f_stat), ]
+
+  message("\nPredictor importance (sorted by F-statistic):")
+  message(sprintf("  %-42s  %5s  %9s  %9s", "Term", "EDF", "F", "p-value"))
+  message("  ", strrep("-", 70))
+  for (i in seq_len(nrow(rows))) {
+    message(sprintf("  %-42s  %5.2f  %9.2f  %9s",
+      rows$term[i],
+      rows$edf[i],
+      rows$f_stat[i],
+      format.pval(rows$p_value[i], digits = 2, eps = 1e-4)
+    ))
+  }
+  message("")
 }
