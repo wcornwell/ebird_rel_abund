@@ -28,7 +28,8 @@ needs_cache <- species_list[!safe_name_local(species_list) %in% cached]
 
 # Also skip species whose output already exists (already done in a prior run)
 already_done <- sub("[.]tif$", "",
-                    list.files(OUTPUT_DIR, pattern = "[.]tif$"))
+                    list.files(file.path(OUTPUT_DIR, "3km"),
+                               pattern = "[.]tif$"))
 species_list <- species_list[!safe_name_local(species_list) %in% already_done]
 message(sprintf("Species already completed (skipping): %d",
                 length(species_df$common_name) - length(species_list)))

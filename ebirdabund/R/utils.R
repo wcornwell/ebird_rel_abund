@@ -79,12 +79,64 @@ load_range_botw <- function(sci_name, botw_path) {
   )
 }
 
+# GAM partial-effect smooth plots for one fitted model.
+# Returns a patchwork ggplot; caller is responsible for saving.
+plot_gam_smooths <- function(mod, species) {
+  train      <- mod$model
+  term_names <- vapply(mod$smooth, function(s) s$term, character(1L))
+
+  plots <- lapply(term_names, function(vname) {
+    if (!vname %in% names(train)) return(NULL)
+    x_raw <- train[[vname]]
+    xvals <- seq(min(x_raw, na.rm = TRUE), max(x_raw, na.rm = TRUE),
+                 length.out = 200L)
+    nd <- train[rep(1L, 200L), ]
+    nd[[vname]] <- xvals
+    for (v in setdiff(term_names, vname)) {
+      if (v %in% names(nd) && is.numeric(nd[[v]]))
+        nd[[v]] <- mean(train[[v]], na.rm = TRUE)
+    }
+    p       <- mgcv::predict.gam(mod, newdata = nd,
+                                 type = "terms", se.fit = TRUE)
+    col_idx <- grep(vname, colnames(p$fit), fixed = TRUE)[1L]
+    if (is.na(col_idx)) return(NULL)
+    df <- data.frame(
+      x  = xvals,
+      y  = p$fit[, col_idx],
+      lo = p$fit[, col_idx] - 2 * p$se.fit[, col_idx],
+      hi = p$fit[, col_idx] + 2 * p$se.fit[, col_idx]
+    )
+    ggplot2::ggplot(df, ggplot2::aes(x = .data$x)) +
+      ggplot2::geom_ribbon(ggplot2::aes(ymin = .data$lo, ymax = .data$hi),
+                           alpha = 0.2, fill = "steelblue") +
+      ggplot2::geom_line(ggplot2::aes(y = .data$y),
+                         colour = "steelblue", linewidth = 0.8) +
+      ggplot2::geom_hline(yintercept = 0, linetype = "dashed",
+                          colour = "grey50") +
+      ggplot2::labs(x = vname, y = NULL) +
+      ggplot2::theme_minimal(base_size = 9)
+  })
+  plots <- Filter(Negate(is.null), plots)
+  if (length(plots) == 0L) return(NULL)
+
+  nc  <- 4L
+  nr  <- ceiling(length(plots) / nc)
+  patchwork::wrap_plots(plots, ncol = nc) +
+    patchwork::plot_annotation(
+      title    = paste(species, "— GAM partial effects"),
+      subtitle = sprintf(
+        "Deviance explained: %.1f%%  |  n = %d checklists",
+        summary(mod)$dev.expl * 100, nrow(train)
+      )
+    )
+}
+
 # Simple ggplot abundance map
 plot_abundance <- function(r_pred, polygon, species) {
   abd_df <- as.data.frame(r_pred[["abd"]], xy = TRUE, na.rm = TRUE)
   names(abd_df) <- c("x", "y", "abd")
 
-  thresh <- max(abd_df$abd, na.rm = TRUE) * 0.01
+  thresh <- stats::quantile(abd_df$abd, probs = 0.05, na.rm = TRUE)
   abd_df <- abd_df[abd_df$abd > thresh, ]
 
   poly_wgs84 <- sf::st_transform(polygon, 4326)

@@ -9,12 +9,14 @@ estimate_abundance(
   ebird_zip,
   sampling_txt,
   species,
+  sci_name = NULL,
   cov_stack = NULL,
   cache_dir = "ebirdabund_cache",
   grid_res_km = 1,
   hex_spacing_km = 5,
   peak_time = NULL,
   use_range = TRUE,
+  botw_path = NULL,
   range_resolution = "27km"
 )
 }

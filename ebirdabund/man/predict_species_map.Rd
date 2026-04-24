@@ -8,10 +8,12 @@ predict_species_map(
   model_fit,
   polygon,
   species,
+  sci_name = NULL,
   grid_res_km = 1,
   peak_time = NULL,
   use_range = TRUE,
-  range_resolution = "27km"
+  botw_path = NULL,
+  range_resolution = "9km"
 )
 }
 \arguments{
@@ -25,7 +27,8 @@ polygon mask and the plot extent).}
 \item{grid_res_km}{Prediction grid resolution in km. Default \code{1}.}
 
 \item{peak_time}{Optional decimal-hour override for observation start time
-used in predictions. Estimated from the model when \code{NULL}.}
+used in predictions. Defaults to the median observation start time in the
+training data (a "typical checklist" reference).}
 
 \item{use_range}{If \code{TRUE} (default), cells outside the eBird species range
 (from \code{ebirdst::load_ranges}) are set to \code{NA}.  Falls back to polygon-only

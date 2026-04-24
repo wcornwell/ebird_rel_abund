@@ -68,7 +68,8 @@ clean_ebird <- function(zf) {
       .data$duration_minutes >= 5,
       .data$duration_minutes <= 300,
       is.na(.data$effort_distance_km) | .data$effort_distance_km <= 10,
-      .data$number_observers <= 10
+      .data$number_observers <= 10,
+      !is.na(time_to_decimal(.data$time_observations_started))
     ) |>
     dplyr::mutate(
       observation_count         = as.integer(.data$observation_count),
@@ -78,6 +79,9 @@ clean_ebird <- function(zf) {
       week                      = lubridate::week(.data$observation_date),
       time_observations_started = time_to_decimal(
         .data$time_observations_started
+      ),
+      effort_distance_km        = dplyr::if_else(
+        is.na(.data$effort_distance_km), 0, .data$effort_distance_km
       ),
       protocol_type             = factor(.data$protocol_type)
     )

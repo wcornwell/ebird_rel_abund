@@ -107,13 +107,14 @@ make_prediction_surface <- function(polygon, grid_res_km) {
   polygon_wgs84 <- sf::st_transform(polygon, 4326)
   res_deg <- grid_res_km / 111.32
 
+  # Cover the full bounding box — no polygon filter here.
+  # Masking is applied later in predict_abundance(). Predicting at the full
+  # bbox avoids NA gaps in the output raster where the polygon is concave.
   grid_pts <- sf::st_make_grid(
     polygon_wgs84,
     cellsize = res_deg,
     what     = "centers"
-  ) |>
-    sf::st_as_sf() |>
-    sf::st_filter(polygon_wgs84)
+  ) |> sf::st_as_sf()
 
   coords <- sf::st_coordinates(grid_pts)
   data.frame(longitude = coords[, 1], latitude = coords[, 2])

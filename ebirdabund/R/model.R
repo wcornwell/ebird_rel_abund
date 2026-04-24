@@ -51,17 +51,59 @@ fit_gam <- function(df) {
 
   message("Fitting negative-binomial GAM (", nrow(df), " checklists)...")
 
-  mod <- mgcv::bam(
-    formula,
-    data     = df,
-    family   = mgcv::nb(),
-    method   = "fREML",
-    discrete = TRUE,
-    knots    = time_knots,
-    gamma    = 1.4,
-    select   = TRUE
-  )
+  fit_bam <- function(select) {
+    converged <- TRUE
+    mod <- withCallingHandlers(
+      tryCatch(
+        mgcv::bam(
+          formula,
+          data     = df,
+          family   = mgcv::nb(),
+          method   = "fREML",
+          discrete = TRUE,
+          knots    = time_knots,
+          gamma    = 1.4,
+          select   = select
+        ),
+        error = function(e) {
+          converged <<- FALSE
+          NULL
+        }
+      ),
+      warning = function(w) {
+        if (grepl("did not converge", conditionMessage(w), fixed = TRUE)) {
+          converged <<- FALSE
+          invokeRestart("muffleWarning")
+        }
+      }
+    )
+    list(mod = mod, converged = converged)
+  }
 
+  res <- fit_bam(select = TRUE)
+
+  if (!res$converged || is.null(res$mod)) {
+    message("  Attempt 1 (select=TRUE) did not converge; ",
+            "retrying without term selection.")
+    res <- fit_bam(select = FALSE)
+  }
+
+  if (!res$converged || is.null(res$mod)) {
+    message("  Attempt 2 (select=FALSE) did not converge; ",
+            "retrying with discrete=FALSE.")
+    res$mod <- mgcv::bam(
+      formula,
+      data     = df,
+      family   = mgcv::nb(),
+      method   = "fREML",
+      discrete = FALSE,
+      knots    = time_knots,
+      gamma    = 1.4,
+      nthreads = 1L
+    )
+  }
+
+  mod <- res$mod
   print_predictor_importance(mod)
   mod
 }

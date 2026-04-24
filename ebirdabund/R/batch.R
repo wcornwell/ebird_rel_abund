@@ -100,6 +100,8 @@ estimate_abundance_batch <- function(
       dir.create(file.path(output_dir, paste0(res_km, "km")),
                  showWarnings = FALSE, recursive = TRUE)
     }
+    dir.create(file.path(output_dir, "models"),  showWarnings = FALSE)
+    dir.create(file.path(output_dir, "smooths"), showWarnings = FALSE)
   }
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -122,6 +124,22 @@ estimate_abundance_batch <- function(
       cache_dir      = cache_dir,
       hex_spacing_km = hex_spacing_km
     )
+
+    if (!is.null(output_dir)) {
+      saveRDS(model_fit$model,
+              file.path(output_dir, "models", paste0(safe_name(sp), ".rds")))
+      smooth_plot <- plot_gam_smooths(model_fit$model, sp)
+      if (!is.null(smooth_plot)) {
+        n_smooths <- length(model_fit$model$smooth)
+        ggplot2::ggsave(
+          file.path(output_dir, "smooths", paste0(safe_name(sp), ".png")),
+          smooth_plot,
+          width  = 14,
+          height = ceiling(n_smooths / 4) * 3 + 1.5,
+          dpi    = 150
+        )
+      }
+    }
 
     for (res_km in grid_res_km) {
       pred <- predict_species_map(

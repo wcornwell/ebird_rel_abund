@@ -9,11 +9,15 @@ estimate_abundance_batch(
   ebird_zip,
   sampling_txt,
   species_list,
+  taxonomy = NULL,
   cov_stack = NULL,
   cache_dir = "ebirdabund_cache",
   grid_res_km = 1,
   hex_spacing_km = 5,
   peak_time = NULL,
+  use_range = TRUE,
+  botw_path = NULL,
+  range_resolution = "27km",
   n_cores = max(1L, parallel::detectCores() - 1L),
   output_dir = NULL
 )
@@ -42,6 +46,13 @@ appear in eBird (duplicates are silently removed).}
 Default \code{5}.}
 
 \item{peak_time}{Optional decimal-hour override for prediction start time.}
+
+\item{use_range}{If \code{TRUE} (default), cells outside the eBird species
+range are set to \code{NA}.  See \code{\link{predict_species_map}} for
+details.}
+
+\item{range_resolution}{Resolution passed to \code{ebirdst::load_ranges};
+\code{"27km"} (default) or \code{"9km"}.}
 
 \item{n_cores}{Number of parallel workers.  Defaults to
 \code{parallel::detectCores() - 1} (minimum 1).}

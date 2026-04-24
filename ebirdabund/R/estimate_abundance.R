@@ -130,7 +130,8 @@ fit_species_model <- function(polygon,
 #' @param species Common name used for range lookup and the plot title.
 #' @param grid_res_km Prediction grid resolution in km. Default `1`.
 #' @param peak_time Optional decimal-hour override for observation start time
-#'   used in predictions. Estimated from the model when `NULL`.
+#'   used in predictions. Defaults to the median observation start time in the
+#'   training data (a "typical checklist" reference).
 #' @param use_range If `TRUE` (default), cells outside the eBird species range
 #'   (from `ebirdst::load_ranges`) are set to `NA`.  Falls back to polygon-only
 #'   masking with a warning if the range cannot be loaded.
