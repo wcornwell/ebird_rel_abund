@@ -163,8 +163,10 @@ estimate_abundance_batch <- function(
       }
     }
 
+    dev_expl <- tryCatch(summary(model_fit$model)$dev.expl, warning = function(w) NA_real_)
+    if (is.nan(dev_expl)) dev_expl <- NA_real_
     list(n_checklists = nrow(model_fit$data),
-         dev_expl     = summary(model_fit$model)$dev.expl)
+         dev_expl     = dev_expl)
   }
 
   # Named vector: common_name -> scientific_name (NA if unknown)

@@ -9,15 +9,15 @@ build_gam_formula <- function(df, hab_cols) {
   effort_terms <- c(
     sprintf("s(day_of_year,                k = %d)", safe_k(df$day_of_year,                5L)),
     sprintf("s(time_observations_started,  bs = 'cc', k = %d)",
-                                                      safe_k(df$time_observations_started, 7L)),
-    sprintf("s(duration_minutes,           k = %d)", safe_k(df$duration_minutes,           5L)),
-    sprintf("s(effort_distance_km,         k = %d)", safe_k(df$effort_distance_km,         5L)),
-    sprintf("s(number_observers,           k = %d)", safe_k(df$number_observers,           5L)),
+                                                      safe_k(df$time_observations_started, 4L)),
+    sprintf("s(duration_minutes,           k = %d)", safe_k(df$duration_minutes,           4L)),
+    sprintf("s(effort_distance_km,         k = %d)", safe_k(df$effort_distance_km,         4L)),
+    sprintf("s(number_observers,           k = %d)", safe_k(df$number_observers,           4L)),
     "protocol_type"
   )
 
   hab_terms <- vapply(hab_cols, function(col) {
-    sprintf("s(%s, k = %d)", col, safe_k(df[[col]], 5L))
+    sprintf("s(%s, k = %d)", col, safe_k(df[[col]], 4L))
   }, character(1))
 
   stats::as.formula(
