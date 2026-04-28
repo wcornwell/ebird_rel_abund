@@ -165,3 +165,78 @@ plot_abundance <- function(r_pred, polygon, species) {
     ) +
     ggplot2::theme_minimal(base_size = 11)
 }
+
+# Plot species relative abundance within a circular area around a point.
+#
+# stack      : SpatRaster (multi-band, one band per species) or path to one
+# lon / lat  : centre of circle in decimal degrees (WGS84)
+# radius_km  : radius of extraction circle in km (default 10)
+# top_n      : number of top species to show (default 100)
+# species_names : optional named character vector mapping safe-names to display
+#                 names; if NULL, safe-names are title-cased for display
+#
+# Returns a ggplot2 object. For 100 species, save at roughly 22 x 10 inches.
+plot_circle_abundance <- function(stack, lon = 149.0041, lat = -32.4553,
+                                  radius_km = 10, top_n = 100,
+                                  species_names = NULL) {
+  if (is.character(stack)) stack <- terra::rast(stack)
+
+  pt     <- sf::st_sfc(sf::st_point(c(lon, lat)), crs = 4326)
+  circle <- sf::st_transform(
+    sf::st_buffer(sf::st_transform(pt, 32755), dist = radius_km * 1e3),
+    4326
+  )
+
+  ex <- terra::extract(stack, terra::vect(circle), fun = "mean", na.rm = TRUE)
+
+  abd_df <- data.frame(
+    species  = names(stack),
+    mean_abd = as.numeric(ex[1L, -1L])
+  )
+  abd_df <- abd_df[!is.na(abd_df$mean_abd) & abd_df$mean_abd > 0, ]
+  abd_df <- abd_df[order(-abd_df$mean_abd), ]
+  abd_df <- utils::head(abd_df, top_n)
+
+  if (!is.null(species_names)) {
+    labels <- species_names[abd_df$species]
+    fallback <- is.na(labels)
+    labels[fallback] <- tools::toTitleCase(
+      gsub("_", " ", abd_df$species[fallback])
+    )
+    abd_df$label <- labels
+  } else {
+    abd_df$label <- tools::toTitleCase(gsub("_", " ", abd_df$species))
+  }
+
+  abd_df$label <- factor(abd_df$label, levels = rev(abd_df$label))
+
+  ggplot2::ggplot(abd_df, ggplot2::aes(x = .data$mean_abd, y = .data$label)) +
+    ggplot2::geom_col(fill = "#3B0F70", alpha = 0.85, width = 0.7) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = sprintf("%.3f", .data$mean_abd)),
+      hjust = -0.15, size = 2.5, colour = "grey30"
+    ) +
+    ggplot2::scale_x_continuous(
+      expand = ggplot2::expansion(mult = c(0, 0.18))
+    ) +
+    ggplot2::labs(
+      title    = sprintf(
+        "Bird abundance within %g km of %.4f°S, %.4f°E",
+        radius_km, abs(lat), lon
+      ),
+      subtitle = paste(
+        "Mean expected birds on a standard 1-hr, 1-km travelling count",
+        sprintf("• top %d species by abundance", nrow(abd_df))
+      ),
+      x = "Mean relative abundance",
+      y = NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 9) +
+    ggplot2::theme(
+      axis.text.y        = ggplot2::element_text(size = 7.5),
+      panel.grid.major.y = ggplot2::element_blank(),
+      panel.grid.minor   = ggplot2::element_blank(),
+      plot.title         = ggplot2::element_text(size = 11, face = "bold"),
+      plot.subtitle      = ggplot2::element_text(size = 8, colour = "grey40")
+    )
+}

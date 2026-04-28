@@ -11,7 +11,7 @@ subsample_hex <- function(df, spacing_km = 5) {
     dplyr::mutate(
       hex_cell = dggridR::dgGEO_to_SEQNUM(dgg, .data$longitude, .data$latitude)$seqnum
     ) |>
-    dplyr::group_by(.data$year, .data$week, .data$hex_cell, .data$species_observed) |>
+    dplyr::group_by(.data$year, .data$week, .data$hex_cell) |>
     dplyr::slice_sample(n = 1) |>
     dplyr::ungroup() |>
     dplyr::select(-"hex_cell")
