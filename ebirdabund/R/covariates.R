@@ -18,7 +18,10 @@
 #' @return A \code{terra::SpatRaster} with layers \code{lc_trees},
 #'   \code{lc_grassland}, \code{lc_shrubs}, \code{lc_cropland},
 #'   \code{lc_built}, \code{lc_water}, \code{elevation}, \code{precip_annual},
-#'   \code{temp_annual}.
+#'   \code{temp_annual}, \code{pop_density} (log10 persons per km²,
+#'   WorldPop 2020 via \code{geodata::population()}), and
+#'   \code{water_occ} (JRC Global Surface Water occurrence 0–100,
+#'   Pekel et al. 2016 updated 2021, streamed via VSICURL).
 #'
 #' @export
 prepare_covariates <- function(polygon,
@@ -32,9 +35,9 @@ prepare_covariates <- function(polygon,
     bb[2] - buffer_deg, bb[4] + buffer_deg
   )
 
-  # Cache key: rounded bbox so tiny reprojection differences don't miss cache
+  # Cache key: rounded bbox + version tag (bump version when layer set changes)
   key        <- paste(round(bb, 2), collapse = "_")
-  stack_path <- file.path(cache_dir, paste0("cov_stack_", key, ".tif"))
+  stack_path <- file.path(cache_dir, paste0("cov_stack_v3_", key, ".tif"))
 
   if (file.exists(stack_path)) {
     message("Loading cached covariate stack from ", stack_path)
@@ -42,7 +45,8 @@ prepare_covariates <- function(polygon,
   }
 
   message("Building covariate stack (downloads cached after first run)...")
-  lc_vars <- c("trees", "grassland", "shrubs", "cropland", "built", "water")
+  # lc_water dropped in favour of water_occ (JRC GSW, 30 m, see below)
+  lc_vars <- c("trees", "grassland", "shrubs", "cropland", "built")
 
   lc_layers <- lapply(lc_vars, function(v) {
     message("  landcover: ", v)
@@ -75,8 +79,23 @@ prepare_covariates <- function(polygon,
   precip_annual <- terra::resample(wc_crop[[12]], lc_layers[[1]])
   temp_annual   <- terra::resample(wc_crop[[1]],  lc_layers[[1]])
 
-  stack        <- terra::rast(c(lc_layers, list(elev, precip_annual, temp_annual)))
-  names(stack) <- c(paste0("lc_", lc_vars), "elevation", "precip_annual", "temp_annual")
+  message("  population density (WorldPop 2020)")
+  pop_raw     <- geodata::population(year = 2020, res = "5", path = cache_dir)
+  pop_cropped <- terra::crop(pop_raw, ext)
+  # log10-transform: persons/km² spans orders of magnitude; +1 avoids log(0)
+  pop_density <- terra::resample(log10(pop_cropped + 1), lc_layers[[1]])
+
+  message("  water occurrence (JRC Global Surface Water, Pekel et al. 2021)")
+  water_occ <- load_jrc_water(bb, ext, lc_layers[[1]])
+
+  stack <- terra::rast(c(
+    lc_layers,
+    list(elev, precip_annual, temp_annual, pop_density, water_occ)
+  ))
+  names(stack) <- c(
+    paste0("lc_", lc_vars),
+    "elevation", "precip_annual", "temp_annual", "pop_density", "water_occ"
+  )
 
   terra::writeRaster(stack, stack_path, overwrite = TRUE)
   message("Covariate stack saved to ", stack_path)

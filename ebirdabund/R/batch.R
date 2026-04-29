@@ -141,6 +141,9 @@ estimate_abundance_batch <- function(
       }
     }
 
+    model_sum <- NA_real_
+    excluded  <- FALSE
+
     for (res_km in grid_res_km) {
       pred <- predict_species_map(
         model_fit        = model_fit,
@@ -153,6 +156,24 @@ estimate_abundance_batch <- function(
         botw_path        = botw_path,
         range_resolution = range_resolution
       )
+
+      # After the first resolution, check whether the species has any meaningful
+      # predicted abundance in the polygon.  predict_abundance already masks to
+      # the polygon, so a plain global sum is sufficient.
+      if (res_km == grid_res_km[1L]) {
+        model_sum <- as.numeric(
+          terra::global(pred$predictions[["abd"]], "sum", na.rm = TRUE)[[1L]]
+        )
+        if (is.na(model_sum) || model_sum <= 1e-5) {
+          excluded <- TRUE
+          message(sprintf(
+            "  [EXCLUDED] %s: negligible polygon abundance (sum = %.2e)",
+            sp, if (is.na(model_sum)) 0 else model_sum
+          ))
+          break
+        }
+      }
+
       if (!is.null(output_dir)) {
         out_dir <- file.path(output_dir, paste0(res_km, "km"))
         stem    <- file.path(out_dir, safe_name(sp))
@@ -166,7 +187,9 @@ estimate_abundance_batch <- function(
     dev_expl <- tryCatch(summary(model_fit$model)$dev.expl, warning = function(w) NA_real_)
     if (is.nan(dev_expl)) dev_expl <- NA_real_
     list(n_checklists = nrow(model_fit$data),
-         dev_expl     = dev_expl)
+         dev_expl     = dev_expl,
+         model_sum    = model_sum,
+         excluded     = excluded)
   }
 
   # Named vector: common_name -> scientific_name (NA if unknown)

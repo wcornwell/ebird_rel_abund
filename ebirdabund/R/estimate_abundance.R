@@ -77,7 +77,9 @@ fit_species_model <- function(polygon,
   message("\n── Step 3/4: Extracting covariates ──────────────────────────")
   ebird_df <- extract_covariates(ebird_df, cov_stack)
 
-  cov_cols      <- grep("^(lc_|elevation|precip_|temp_)", names(ebird_df), value = TRUE)
+  cov_cols <- grep(
+    "^(lc_|elevation|precip_|temp_|pop_|water_)", names(ebird_df), value = TRUE
+  )
   n_before_drop <- nrow(ebird_df)
   ebird_df      <- tidyr::drop_na(ebird_df, dplyr::all_of(cov_cols))
   n_dropped     <- n_before_drop - nrow(ebird_df)

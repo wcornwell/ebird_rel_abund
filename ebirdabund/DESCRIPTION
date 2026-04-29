@@ -24,6 +24,8 @@ Imports:
     tidyr
 Suggests:
     ebirdst,
+    ggrepel,
+    patchwork,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 Config/roxygen2/version: 7.3.3.9000

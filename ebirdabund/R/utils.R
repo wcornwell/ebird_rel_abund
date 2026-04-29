@@ -240,3 +240,221 @@ plot_circle_abundance <- function(stack, lon = 149.0041, lat = -32.4553,
       plot.subtitle      = ggplot2::element_text(size = 8, colour = "grey40")
     )
 }
+
+# Pairwise scatterplot matrix comparing five species-level abundance metrics
+# for all species present in the stack within a given polygon.
+#
+# The five metrics are:
+#   1. model_sum  — sum of the modelled abundance raster over the polygon
+#   2. freq_all   — detection rate across all cleaned checklists in the polygon
+#   3. abd_all    — mean observation count (incl. zeros) across all checklists
+#   4. freq_sub   — detection rate after spatiotemporal subsampling
+#   5. abd_sub    — mean observation count after spatiotemporal subsampling
+#
+# stack          : multi-band SpatRaster (one band per species, safe-name layers)
+#                  or a path to one
+# polygon        : sf object defining the study area
+# cache_dir      : directory containing zerofilled_{species}.rds files
+# species_names  : optional named character vector mapping safe-name → display name
+# top_label_n    : number of species (by model_sum) to label on every panel
+# hex_spacing_km : hex-cell diameter for subsampling (matches model fitting default)
+#
+# Returns a patchwork ggplot. Save at ~22 × 14 inches for 15 labelled species.
+plot_abundance_comparison <- function(stack,
+                                      polygon,
+                                      cache_dir      = "ebirdabund_cache",
+                                      species_names  = NULL,
+                                      top_label_n    = 15,
+                                      hex_spacing_km = 5) {
+
+  if (is.character(stack)) stack <- terra::rast(stack)
+
+  poly_wgs84 <- sf::st_transform(polygon, 4326)
+  poly_vect  <- terra::vect(poly_wgs84)
+
+  # ── (1) Modelled sum in polygon per species ─────────────────────────────────
+  model_sum <- as.numeric(
+    terra::global(terra::mask(stack, poly_vect), "sum", na.rm = TRUE)[[1L]]
+  )
+  sp_safe <- names(stack)
+
+  # ── Build hex grid once so dgconstruct() isn't called 500+ times ────────────
+  invisible(utils::capture.output(
+    suppressMessages(dgg_obj <- dggridR::dgconstruct(spacing = hex_spacing_km))
+  ))
+
+  # ── Precompute valid checklist IDs with one polygon intersection ────────────
+  # Cache files are bbox-filtered; do the precise polygon test once on the first
+  # available species, then reuse the resulting checklist_id set for all others.
+  message(sprintf("Loading raw checklist stats for %d species...", length(sp_safe)))
+  valid_ids <- NULL
+  for (sp_init in sp_safe) {
+    cache_init <- file.path(cache_dir, sprintf("zerofilled_%s.rds", sp_init))
+    if (!file.exists(cache_init)) next
+    zf_init <- tryCatch(readRDS(cache_init), error = function(e) NULL)
+    if (is.null(zf_init) || nrow(zf_init) == 0L) next
+    zf_init <- tryCatch(clean_ebird(zf_init), error = function(e) NULL)
+    if (is.null(zf_init) || nrow(zf_init) == 0L) next
+    zf_sf_init <- sf::st_as_sf(zf_init, coords = c("longitude", "latitude"),
+                                crs = 4326L, remove = FALSE)
+    valid_ids <- sf::st_drop_geometry(
+      sf::st_filter(zf_sf_init, poly_wgs84)
+    )$checklist_id
+    break
+  }
+  if (is.null(valid_ids)) stop("Could not determine valid checklist IDs from cache.")
+  message(sprintf("  %d checklists inside polygon.", length(valid_ids)))
+
+  raw_list <- lapply(seq_along(sp_safe), function(i) {
+    sp      <- sp_safe[i]
+    cache_f <- file.path(cache_dir, sprintf("zerofilled_%s.rds", sp))
+    if (!file.exists(cache_f)) return(NULL)
+
+    zf <- tryCatch(readRDS(cache_f), error = function(e) NULL)
+    if (is.null(zf) || nrow(zf) == 0L) return(NULL)
+
+    zf <- tryCatch(clean_ebird(zf), error = function(e) NULL)
+    if (is.null(zf) || nrow(zf) == 0L) return(NULL)
+
+    zf <- zf[zf$checklist_id %in% valid_ids, ]
+    if (nrow(zf) == 0L) return(NULL)
+
+    freq_all <- mean(zf$species_observed, na.rm = TRUE)
+    abd_all  <- mean(zf$observation_count, na.rm = TRUE)
+
+    # Subsample using the shared dgg object (no dgconstruct call per species)
+    zf_ss <- tryCatch({
+      zf |>
+        dplyr::mutate(
+          hex_cell = dggridR::dgGEO_to_SEQNUM(dgg_obj,
+                                               .data$longitude,
+                                               .data$latitude)$seqnum
+        ) |>
+        dplyr::group_by(.data$year, .data$week, .data$hex_cell) |>
+        dplyr::slice_sample(n = 1L) |>
+        dplyr::ungroup() |>
+        dplyr::select(-"hex_cell")
+    }, error = function(e) NULL)
+
+    if (!is.null(zf_ss) && nrow(zf_ss) > 0L) {
+      freq_sub <- mean(zf_ss$species_observed, na.rm = TRUE)
+      abd_sub  <- mean(zf_ss$observation_count, na.rm = TRUE)
+    } else {
+      freq_sub <- NA_real_
+      abd_sub  <- NA_real_
+    }
+
+    data.frame(
+      species   = sp,
+      model_sum = model_sum[i],
+      freq_all  = freq_all,
+      abd_all   = abd_all,
+      freq_sub  = freq_sub,
+      abd_sub   = abd_sub,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  df <- do.call(rbind, Filter(Negate(is.null), raw_list))
+  if (is.null(df) || nrow(df) == 0L) stop("No species data could be computed.")
+  # Require model_sum to exceed eps so that species absent from the polygon
+  # (tiny raster residuals) don't pile up at log10(eps) = -5 in the plot.
+  eps <- 1e-5
+  df <- df[!is.na(df$model_sum) & df$model_sum > eps, ]
+
+  # ── Display names ───────────────────────────────────────────────────────────
+  if (!is.null(species_names)) {
+    labs     <- species_names[df$species]
+    fallback <- is.na(labs)
+    labs[fallback] <- tools::toTitleCase(gsub("_", " ", df$species[fallback]))
+    df$display <- labs
+  } else {
+    df$display <- tools::toTitleCase(gsub("_", " ", df$species))
+  }
+
+  # Notable = top N by modelled sum; their labels appear on every panel
+  notable_spp <- df$species[order(-df$model_sum)][seq_len(min(top_label_n, nrow(df)))]
+  df$notable  <- df$species %in% notable_spp
+  df$label    <- ifelse(df$notable, df$display, "")
+
+  # ── Log10 transform all variables (all span orders of magnitude) ────────────
+  # model_sum is already > eps (guaranteed above); no epsilon needed.
+  # Rates/counts can be legitimately zero so still need eps.
+  plot_df <- df
+  plot_df$model_sum <- log10(df$model_sum)
+  plot_df$freq_all  <- log10(df$freq_all  + eps)
+  plot_df$abd_all   <- log10(df$abd_all   + eps)
+  plot_df$freq_sub  <- log10(df$freq_sub  + eps)
+  plot_df$abd_sub   <- log10(df$abd_sub   + eps)
+
+  var_meta <- list(
+    model_sum = list(label = "Modelled total\n(log₁₀ stack sum)"),
+    freq_all  = list(label = "Detection rate\n(log₁₀, all checklists)"),
+    abd_all   = list(label = "Mean count\n(log₁₀, all checklists)"),
+    freq_sub  = list(label = "Detection rate\n(log₁₀, subsampled)"),
+    abd_sub   = list(label = "Mean count\n(log₁₀, subsampled)")
+  )
+  vars <- names(var_meta)
+
+  use_ggrepel <- requireNamespace("ggrepel", quietly = TRUE)
+
+  # All C(5,2) = 10 pairs, iterating in natural combn order
+  pairs <- utils::combn(vars, 2L, simplify = FALSE)
+
+  panels <- lapply(pairs, function(p) {
+    xv     <- p[1L]
+    yv     <- p[2L]
+    sub_df <- plot_df[!is.na(plot_df[[xv]]) & !is.na(plot_df[[yv]]), ]
+
+    g <- ggplot2::ggplot(sub_df,
+           ggplot2::aes(x = .data[[xv]], y = .data[[yv]])) +
+      ggplot2::geom_point(
+        ggplot2::aes(colour = .data$notable),
+        alpha = 0.55, size = 1.5
+      ) +
+      ggplot2::scale_colour_manual(
+        values = c("FALSE" = "grey70", "TRUE" = "#3B0F70"),
+        guide  = "none"
+      ) +
+      ggplot2::labs(
+        x = var_meta[[xv]]$label,
+        y = var_meta[[yv]]$label
+      ) +
+      ggplot2::theme_minimal(base_size = 9) +
+      ggplot2::theme(
+        axis.title   = ggplot2::element_text(size = 7.5),
+        panel.border = ggplot2::element_rect(fill = NA, colour = "grey85",
+                                             linewidth = 0.4),
+        plot.margin  = ggplot2::margin(4, 6, 4, 6)
+      )
+
+    if (use_ggrepel) {
+      g <- g + ggrepel::geom_text_repel(
+        ggplot2::aes(label = .data$label),
+        size               = 2.2,
+        max.overlaps       = 20L,
+        segment.colour     = "grey60",
+        segment.size       = 0.25,
+        min.segment.length = 0.1,
+        force              = 2,
+        seed               = 42L,
+        show.legend        = FALSE
+      )
+    } else {
+      g <- g + ggplot2::geom_text(
+        ggplot2::aes(label = .data$label),
+        size = 2.2, check_overlap = TRUE, vjust = -0.5
+      )
+    }
+    g
+  })
+
+  patchwork::wrap_plots(panels, ncol = 4L) +
+    patchwork::plot_annotation(
+      title    = "Abundance metrics — all pairwise species comparisons",
+      subtitle = sprintf(
+        "%d species  •  top %d by modelled sum highlighted and labelled",
+        nrow(df), sum(df$notable)
+      )
+    )
+}

@@ -6,13 +6,18 @@ safe_k <- function(x, default_k) {
 }
 # Build a GAM formula with data-driven k for each smooth term.
 build_gam_formula <- function(df, hab_cols) {
+  sk <- function(var, k) safe_k(df[[var]], k)
   effort_terms <- c(
-    sprintf("s(day_of_year,                k = %d)", safe_k(df$day_of_year,                5L)),
-    sprintf("s(time_observations_started,  bs = 'cc', k = %d)",
-                                                      safe_k(df$time_observations_started, 4L)),
-    sprintf("s(duration_minutes,           k = %d)", safe_k(df$duration_minutes,           4L)),
-    sprintf("s(effort_distance_km,         k = %d)", safe_k(df$effort_distance_km,         4L)),
-    sprintf("s(number_observers,           k = %d)", safe_k(df$number_observers,           4L)),
+    sprintf("s(day_of_year, k = %d)",
+            sk("day_of_year", 5L)),
+    sprintf("s(time_observations_started, bs = 'cc', k = %d)",
+            sk("time_observations_started", 4L)),
+    sprintf("s(duration_minutes, k = %d)",
+            sk("duration_minutes", 4L)),
+    sprintf("s(effort_distance_km, k = %d)",
+            sk("effort_distance_km", 4L)),
+    sprintf("s(number_observers, k = %d)",
+            sk("number_observers", 4L)),
     "protocol_type"
   )
 
@@ -29,10 +34,13 @@ build_gam_formula <- function(df, hab_cols) {
 # Fit a negative-binomial GAM to training data.
 # Returns the fitted mgcv::gam object.
 fit_gam <- function(df) {
-  hab_cols <- grep("^(lc_|elevation|precip_|temp_)", names(df), value = TRUE)
+  hab_cols <- grep(
+    "^(lc_|elevation|precip_|temp_|pop_|water_)", names(df), value = TRUE
+  )
 
   if (length(hab_cols) == 0) {
-    stop("No habitat covariate columns found (expected names starting with 'lc_' or 'elevation').")
+    stop("No habitat covariate columns found (expected lc_*, ",
+         "elevation, precip_*, temp_*, or pop_*).")
   }
 
   # Drop any hab col with < 4 unique values (can't build even a k=3 spline)
@@ -44,7 +52,8 @@ fit_gam <- function(df) {
 
   # Set "Traveling Count" as reference level when present, else most common
   protocols <- levels(df$protocol_type)
-  ref_proto <- if ("Traveling Count" %in% protocols) "Traveling Count" else protocols[1]
+  ref_proto <- if ("Traveling Count" %in% protocols) "Traveling Count" else
+    protocols[1]
   df$protocol_type <- stats::relevel(df$protocol_type, ref = ref_proto)
 
   time_knots <- list(time_observations_started = c(0, 24))

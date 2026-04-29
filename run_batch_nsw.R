@@ -15,9 +15,12 @@ BOTW_PATH  <- "botw_species/BOTW_2025.gpkg"
 TAXONOMY   <- "nsw_ebird_taxonomy.csv"
 
 # ── Species list ──────────────────────────────────────────────────────────────
+# reporting_rate is already computed against effort-filtered complete checklists
+# (see nsw_species_list.R), so this threshold is applied to the correct base.
 species_df   <- read.csv("nsw_species_list.csv", stringsAsFactors = FALSE)
+species_df   <- species_df[species_df$reporting_rate >= 0.005, ]
 species_list <- species_df$common_name
-message(sprintf("Species to process: %d", length(species_list)))
+message(sprintf("Species to process: %d (reporting_rate >= 0.005%%)", length(species_list)))
 
 # ── Pre-cache: build missing zerofilled .rds files in one EBD pass ───────────
 # Prevents parallel workers competing to fread the large EBD simultaneously.
@@ -26,10 +29,17 @@ cached <- sub("^zerofilled_", "", sub("[.]rds$", "",
               list.files(CACHE, pattern = "zerofilled_.*[.]rds")))
 needs_cache <- species_list[!safe_name_local(species_list) %in% cached]
 
-# Also skip species whose output already exists (already done in a prior run)
-already_done <- sub("[.]tif$", "",
-                    list.files(file.path(OUTPUT_DIR, "3km"),
-                               pattern = "[.]tif$"))
+# Also skip species whose output already exists or were previously excluded
+done_tif <- sub("[.]tif$", "",
+                list.files(file.path(OUTPUT_DIR, "3km"), pattern = "[.]tif$"))
+done_log <- character(0)
+if (file.exists(LOG_FILE)) {
+  prior_log <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
+  done_log  <- safe_name_local(
+    prior_log$common_name[prior_log$status %in% c("ok", "excluded")]
+  )
+}
+already_done <- union(done_tif, done_log)
 species_list <- species_list[!safe_name_local(species_list) %in% already_done]
 message(sprintf("Species already completed (skipping): %d",
                 length(species_df$common_name) - length(species_list)))
@@ -131,23 +141,36 @@ results <- estimate_abundance_batch(
 
 t_total <- proc.time()[["elapsed"]] - t_start
 
-# ── Write log ─────────────────────────────────────────────────────────────────
-ok      <- !vapply(results, inherits, TRUE, "error")
+# ── Write summary CSV ─────────────────────────────────────────────────────────
 log_df  <- data.frame(
   common_name   = names(results),
-  status        = ifelse(ok, "ok", "failed"),
-  error_message = vapply(results, function(r) {
-    if (inherits(r, "error")) conditionMessage(r) else NA_character_
+  status        = vapply(results, function(r) {
+    if (inherits(r, "error"))    "failed"
+    else if (isTRUE(r$excluded)) "excluded"
+    else "ok"
   }, character(1)),
   n_checklists  = vapply(results, function(r) {
     if (inherits(r, "error")) NA_integer_ else r$n_checklists
   }, integer(1)),
+  dev_expl      = vapply(results, function(r) {
+    if (inherits(r, "error")) NA_real_ else r$dev_expl
+  }, numeric(1)),
+  model_sum     = vapply(results, function(r) {
+    if (inherits(r, "error")) NA_real_ else r$model_sum
+  }, numeric(1)),
+  error_message = vapply(results, function(r) {
+    if (inherits(r, "error")) conditionMessage(r) else NA_character_
+  }, character(1)),
   stringsAsFactors = FALSE
 )
-# Append to existing log if present (supports resumed runs)
+# Merge with prior runs so the CSV always covers all species ever processed
 if (file.exists(LOG_FILE)) {
-  prior <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
-  log_df <- rbind(prior[!prior$common_name %in% log_df$common_name, ], log_df)
+  prior  <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
+  # align columns (prior runs may have fewer columns)
+  for (col in setdiff(names(log_df), names(prior))) prior[[col]] <- NA
+  log_df <- rbind(prior[!prior$common_name %in% log_df$common_name,
+                         names(log_df)],
+                  log_df)
 }
 write.csv(log_df, LOG_FILE, row.names = FALSE)
 
@@ -175,12 +198,16 @@ for (res_km in c(3, 9)) {
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
-hrs  <- floor(t_total / 3600)
-mins <- floor((t_total %% 3600) / 60)
-secs <- round(t_total %% 60)
+hrs      <- floor(t_total / 3600)
+mins     <- floor((t_total %% 3600) / 60)
+secs     <- round(t_total %% 60)
+n_ok     <- sum(log_df$status == "ok")
+n_excl   <- sum(log_df$status == "excluded")
+n_failed <- sum(log_df$status == "failed")
 cat(sprintf(
-  "\n════════════════════════════════════════\n%d/%d species succeeded  |  %dh %02dm %02ds\nFailed: %s\nLog: %s\n",
-  sum(ok), length(results), hrs, mins, secs,
-  if (any(!ok)) paste(names(results)[!ok], collapse = ", ") else "none",
+  "\n════════════════════════════════════════\n%d ok  |  %d excluded  |  %d failed  |  %dh %02dm %02ds\nExcluded: %s\nFailed: %s\nLog: %s\n",
+  n_ok, n_excl, n_failed, hrs, mins, secs,
+  if (n_excl  > 0) paste(log_df$common_name[log_df$status == "excluded"], collapse = ", ") else "none",
+  if (n_failed > 0) paste(log_df$common_name[log_df$status == "failed"],  collapse = ", ") else "none",
   LOG_FILE
 ))
