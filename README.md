@@ -64,90 +64,106 @@ For multiple species use `estimate_abundance_batch()`.
 
 ---
 
-## How this compares to `06_abundance.Rmd`
+## Relationship to Strimas-Mackey et al. (2023)
 
-The package shares the same core statistical approach as chapter 6 of the [eBird Best Practices guide](https://cornelllabofornithology.github.io/ebird-best-practices/) but generalises and automates it. The table below summarises the key differences.
+`ebirdabund` implements the same core statistical workflow as Chapter 6 of *Best Practices for Using eBird Data* (Strimas-Mackey et al. 2023): spatiotemporal hex subsampling → negative-binomial GAM → standardised-effort prediction. The sections below document where the package diverges from that reference implementation.
+
+> Strimas-Mackey, M., W.M. Hochachka, V. Ruiz-Gutierrez, O.J. Robinson, E.T. Miller, T. Auer, S. Kelling, D. Fink, A. Johnston. 2023. *Best Practices for Using eBird Data*. Version 2.0. Cornell Lab of Ornithology, Ithaca, New York. <https://doi.org/10.5281/zenodo.3620739>
 
 ### 1. Inputs and data loading
 
-| | `06_abundance.Rmd` | `ebirdabund` |
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| eBird data | Pre-processed zero-filled CSV | Raw EBD `.txt`/`.zip` + sampling-events `.txt`; zero-fill done internally |
+| eBird data | Pre-processed zero-filled CSV | Raw EBD `.txt`/`.zip` + sampling-events `.txt`; zero-fill performed internally |
 | Species | Wood Thrush (hard-coded) | Any eBird common name |
 | Study region | BCR 27 (hard-coded) | Any `sf` polygon |
 | Caching | None | Zero-filled data cached as `.rds`; covariate raster cached as GeoTIFF |
+| Mega-flock records | Retained | Checklists with counts > 200 excluded |
 
-The package performs the zero-fill itself via `load_ebird.R`, reading the raw EBD with `data.table::fread` and left-joining complete checklists with species detections. The tutorial assumes this step was completed in an earlier chapter.
+Zero-fill is performed via `load_ebird.R`, reading the raw EBD with `data.table::fread` and left-joining complete checklists with species detections. Checklists with `observation_count > 200` are excluded: such records typically reflect targeted sampling of a known flock rather than a passive encounter rate, and their inclusion biases abundance estimates upward for gregarious species.
 
 ### 2. Habitat covariates
 
-| | `06_abundance.Rmd` | `ebirdabund` |
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| Source | Pre-downloaded MODIS PLAND + elevation CSV | ESA WorldCover, SRTM elevation, WorldClim BIO1/BIO12 — downloaded via `geodata` |
-| Variables | 4 species-specific PLAND classes + elevation | 6 generic land-cover fractions (`lc_trees`, `lc_grassland`, `lc_shrubs`, `lc_cropland`, `lc_built`, `lc_water`), `elevation`, `precip_annual`, `temp_annual` |
-| Selection | Manually chosen for Wood Thrush | All available; columns with < 4 unique values dropped automatically |
+| Source | Pre-downloaded MODIS PLAND + elevation CSV | ESA WorldCover, SRTM elevation, WorldClim BIO1/BIO12, WorldPop 2020, JRC Global Surface Water — downloaded automatically via `geodata` / VSICURL |
+| Land-cover variables | 4 species-specific PLAND classes | `lc_trees`, `lc_grassland`, `lc_cropland`, `lc_built` (4 generic fractions) |
+| Climate | Not included | `precip_annual` (WorldClim BIO12), `temp_annual` (WorldClim BIO1) |
+| Water | Not included | `water_occ`: JRC Global Surface Water occurrence 0–100 (Pekel et al. 2016, updated 2021), streamed at 30 m via VSICURL |
+| Human footprint | Not included | `pop_density`: log₁₀(persons km⁻² + 1), WorldPop 2020 |
+| Covariate selection | Manually chosen for Wood Thrush | Automated; columns with < 4 unique values dropped; `lc_shrubs` always excluded |
 | Raster package | `raster` | `terra` |
+
+`water_occ` is preferred over the ESA WorldCover water fraction because it distinguishes permanent from seasonal surface water at finer spatial resolution. `pop_density` is included to account for the observer-density gradient inherent in citizen-science data. `lc_shrubs` is excluded from model fitting because it is collinear with other land-cover terms and degrades convergence for rare species with sparse detections.
 
 ### 3. Spatiotemporal subsampling
 
-Both workflows use the same hexagonal subsampling strategy — one checklist per hex cell per week, detections and non-detections sampled independently — via `dggridR` at ~5 km spacing. The package exposes `hex_spacing_km` as a parameter; the tutorial hard-codes 5 km.
+Both workflows apply hexagonal subsampling via `dggridR` at ~5 km spacing (one checklist per hex cell per week). The package exposes `hex_spacing_km` as a parameter; Strimas-Mackey et al. (2023) hard-code 5 km.
 
-Note: the current subsampling groups by `year × week × cell` without stratifying by detection status, whereas the tutorial samples detections and non-detections independently. See `subsample.R` for details.
+Note: subsampling groups by `year × week × cell` without stratifying by detection status, whereas Strimas-Mackey et al. (2023) sample detections and non-detections independently. See `subsample.R` for details.
 
-### 4. Train/test split and model selection
+### 4. Model evaluation
 
-| | `06_abundance.Rmd` | `ebirdabund` |
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| Train/test split | 80/20 random split | None — all subsampled data used |
-| Distributions compared | Zero-inflated Poisson, Negative Binomial, Tweedie | Negative Binomial only |
-| Model selection | Spearman rank correlation and MAD on held-out test set | Not performed; NB chosen a priori |
+| Train/test split | 80/20 random split used for distribution comparison | No train/test split; all subsampled data used for fitting |
+| Distribution comparison | Zero-inflated Poisson, Negative Binomial, Tweedie compared on held-out set | Negative Binomial fixed a priori |
+| Cross-validation | Not performed | `evaluate_model_cv()`: k-fold CV reporting Spearman ρ, Pearson r, MAE, RMSE, holdout deviance explained |
+| Covariate comparison | Not provided | `compare_covariate_models()`: effort-only vs. full habitat model (and arbitrary additional formulas) via the same CV framework |
 
-The tutorial compares three distributions and selects the best. The package skips this comparison, fixing negative binomial. This trades flexibility for automation.
+Fixing Negative Binomial rather than selecting the distribution from data trades flexibility for automation. `evaluate_model_cv()` and `compare_covariate_models()` provide post-hoc tools for assessing fit quality and diagnosing whether habitat covariates add predictive skill beyond effort alone.
 
 ### 5. GAM fitting
 
-| | `06_abundance.Rmd` | `ebirdabund` |
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| Fitting function | `mgcv::gam()` | `mgcv::bam()` with `fREML` + `discrete=TRUE` |
-| Smooth `k` values | Fixed: `k=5` for most, `k=7` for cyclic time | Data-driven via `safe_k()`: capped at `n_unique - 1`, minimum 3 |
-| Cyclic time knots | `seq(0, 24, length.out = k_time)` | `c(0, 24)` (boundary knots only) |
+| Fitting function | `mgcv::gam()` | `mgcv::bam()` with `fREML` and `discrete = TRUE` |
+| `day_of_year` smooth | Thin-plate spline, `k = 5` | Cyclic cubic spline (`bs = "cc"`), `k = 10`, boundary knots `c(0, 365)` |
+| `time_observations_started` smooth | Cyclic cubic spline, `k = 7`, interior knots | Cyclic cubic spline (`bs = "cc"`), `k = 4`, boundary knots `c(0, 24)` |
+| Other smooth `k` values | Fixed at 5 | Data-driven via `safe_k()`: min(default, n\_unique − 1), floor of 3 |
 | Over-fit penalty | None | `gamma = 1.4` |
-| Term shrinkage | No | `select = TRUE`; falls back to `select = FALSE` then `discrete = FALSE` on non-convergence |
+| Term shrinkage | No | `select = TRUE`; falls back to `select = FALSE`, then `discrete = FALSE`, on non-convergence |
 
-`bam()` is faster and lower-memory than `gam()` for large datasets, making it more suitable for the package's general-purpose use case.
+`bam()` is faster and lower-memory than `gam()` for large datasets. A cyclic spline for `day_of_year` enforces continuity at the year boundary (important for southern-hemisphere species whose abundance peak spans December–January). `gamma = 1.4` penalises complexity beyond what the data support, reducing over-fitting in data-sparse regions.
 
 ### 6. Standard-effort prediction
 
-| | `06_abundance.Rmd` | `ebirdabund` |
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| Peak time | Scans 300 start times; picks time where lower CI is maximised | Fixed at **06:00**; overridable via `peak_time` |
-| Reference date | Mid-June (hard-coded for Wood Thrush) | Circular mean of detection DOYs (handles species peaking near year boundary, e.g. Dec–Jan in the southern hemisphere) |
+| Reference date | Mid-June (hard-coded for Wood Thrush) | Circular mean of detection day-of-year |
+| Peak observation time | Scans 300 candidate start times; selects time maximising lower confidence limit | Circular mean of detection start times |
 | Standard effort | 1 km, 60 min, 1 observer, Traveling Count | Same |
-| Prediction cap | None | Log-scale cap at the 90th percentile of observed non-zero counts, to prevent overflow in data-sparse regions |
+| Prediction cap | None | Log-scale cap at the 90th percentile of observed non-zero counts |
+| `abd_se` scale | Response scale | Log (link) scale; asymmetric 95% CI: `[abd × exp(−1.96 × abd_se), abd × exp(+1.96 × abd_se)]` |
+
+The circular mean is used for both reference date and reference time so that species with phenological peaks near the year boundary (e.g. December–January breeders in the southern hemisphere) or near midnight are handled correctly. Storing `abd_se` on the log scale allows asymmetric confidence intervals that respect the positivity constraint on abundance.
 
 ### 7. Prediction output and range masking
 
-| | `06_abundance.Rmd` | `ebirdabund` |
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| Rasterization | `raster::rasterize()` onto a template | `terra::rast()` built from an explicit bounding-box template (prevents NA gaps in concave polygons) |
-| Layers | `abd`, `abd_se` | `abd`, `abd_se` |
-| Range masking | None | Optional masking to eBirdST range or BirdLife BOTW polygons |
-| Map | Base-R `plot()` + `fields::image.plot` legend | `ggplot2` map returned as a list element |
+| Rasterization | `raster::rasterize()` onto a template | `terra::rast()` from an explicit bounding-box template (prevents NA gaps in concave polygons) |
+| Output layers | `abd`, `abd_se` | `abd`, `abd_se` (SE on log scale; see §6) |
+| Range masking | None | Optional masking to eBirdST seasonal range or BirdLife BOTW polygons |
+| Map | Base-R `plot()` with `fields::image.plot` legend | `ggplot2` map returned as a list element |
+| Batch zero-abundance check | N/A | Species with negligible predicted polygon abundance (sum ≤ 10⁻⁵) excluded automatically in `estimate_abundance_batch()` |
 
 ### 8. API and usability
 
-| | `06_abundance.Rmd` | `ebirdabund` |
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| Interface | Inline script | Exported functions: `prepare_covariates()`, `fit_species_model()`, `predict_species_map()`, `estimate_abundance()` |
+| Interface | Inline R script | Exported functions: `prepare_covariates()`, `fit_species_model()`, `predict_species_map()`, `estimate_abundance()` |
 | Multi-species | Manual copy-paste | `estimate_abundance_batch()` |
+| Model evaluation | None | `evaluate_model_cv()`, `compare_covariate_models()` |
 | Progress | Print statements | Numbered step messages, convergence fallbacks, ranked predictor importance table |
 
 ### Summary
 
-The package keeps the same core statistical approach — spatiotemporal hex subsampling → negative-binomial GAM → standardised-effort prediction — but generalises it by:
+The package implements the core pipeline of Strimas-Mackey et al. (2023) — spatiotemporal hex subsampling → negative-binomial GAM → standardised-effort prediction — and generalises it by:
 
-1. Accepting raw eBird files instead of pre-processed CSVs.
-2. Downloading covariates automatically from open global sources.
-3. Replacing the interactive model-comparison step with a fixed NB choice and automated convergence fallbacks.
-4. Using `bam()` for scalability, with data-driven `k` and `gamma = 1.4` to reduce over-fitting.
-5. Adding range masking and a prediction cap to improve map quality without user intervention.
+1. Accepting raw eBird EBD files rather than pre-processed CSVs.
+2. Downloading covariates automatically from open global sources (ESA WorldCover, SRTM, WorldClim, WorldPop, JRC Global Surface Water).
+3. Replacing interactive distribution comparison with a fixed Negative Binomial choice and automated convergence fallbacks.
+4. Using `bam()` for scalability, with cyclic splines for periodically-bounded predictors, data-driven `k`, and `gamma = 1.4` to reduce over-fitting.
+5. Providing `evaluate_model_cv()` and `compare_covariate_models()` for post-hoc assessment of model skill.
+6. Adding range masking, a prediction cap, and a log-scale SE output to improve map quality.
