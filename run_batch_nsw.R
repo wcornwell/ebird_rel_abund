@@ -198,9 +198,21 @@ for (res_km in c(3, 9)) {
   stack      <- terra::rast(abd_layers)
   names(stack) <- sp_names
 
-  stack_path <- file.path(OUTPUT_DIR, sprintf("nsw_abundance_stack_%dkm.tif", res_km))
+  stack_path <- file.path(
+    OUTPUT_DIR, sprintf("nsw_abundance_stack_%dkm.tif", res_km)
+  )
   terra::writeRaster(stack, stack_path, overwrite = TRUE)
   message(sprintf("  Saved: %s  (%d bands)", stack_path, terra::nlyr(stack)))
+
+  se_layers <- lapply(tif_files, function(f) terra::rast(f)[["abd_se"]])
+  se_stack  <- terra::rast(se_layers)
+  names(se_stack) <- sp_names
+
+  se_path <- file.path(
+    OUTPUT_DIR, sprintf("nsw_abundance_se_stack_%dkm.tif", res_km)
+  )
+  terra::writeRaster(se_stack, se_path, overwrite = TRUE)
+  message(sprintf("  Saved: %s  (%d bands)", se_path, terra::nlyr(se_stack)))
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────

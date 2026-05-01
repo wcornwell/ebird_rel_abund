@@ -84,7 +84,10 @@ clean_ebird <- function(zf) {
         is.na(.data$effort_distance_km), 0, .data$effort_distance_km
       ),
       protocol_type             = factor(.data$protocol_type)
-    )
+    ) |>
+    # Exclude mega-flock checklists: counts >500 reflect targeted non-random
+    # sampling (observer sought out the flock) rather than encounter-rate signal.
+    dplyr::filter(.data$observation_count <= 200)
 }
 
 # Main loader: read, zero-fill, clean, clip to polygon.

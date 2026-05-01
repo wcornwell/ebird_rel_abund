@@ -19,7 +19,10 @@ downloading. Default \code{0.5}.}
 A \code{terra::SpatRaster} with layers \code{lc_trees},
 \code{lc_grassland}, \code{lc_shrubs}, \code{lc_cropland},
 \code{lc_built}, \code{lc_water}, \code{elevation}, \code{precip_annual},
-\code{temp_annual}.
+\code{temp_annual}, \code{pop_density} (log10 persons per km²,
+WorldPop 2020 via \code{geodata::population()}), and
+\code{water_occ} (JRC Global Surface Water occurrence 0–100,
+Pekel et al. 2016 updated 2021, streamed via VSICURL).
 }
 \description{
 Downloads ESA WorldCover land-cover layers and SRTM elevation from the

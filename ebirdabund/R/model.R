@@ -8,8 +8,8 @@ safe_k <- function(x, default_k) {
 build_gam_formula <- function(df, hab_cols) {
   sk <- function(var, k) safe_k(df[[var]], k)
   effort_terms <- c(
-    sprintf("s(day_of_year, k = %d)",
-            sk("day_of_year", 5L)),
+    sprintf("s(day_of_year, bs = 'cc', k = %d)",
+            sk("day_of_year", 10L)),
     sprintf("s(time_observations_started, bs = 'cc', k = %d)",
             sk("time_observations_started", 4L)),
     sprintf("s(duration_minutes, k = %d)",
@@ -37,6 +37,7 @@ fit_gam <- function(df) {
   hab_cols <- grep(
     "^(lc_|elevation|precip_|temp_|pop_|water_)", names(df), value = TRUE
   )
+  hab_cols <- setdiff(hab_cols, "lc_shrubs")
 
   if (length(hab_cols) == 0) {
     stop("No habitat covariate columns found (expected lc_*, ",
@@ -56,7 +57,8 @@ fit_gam <- function(df) {
     protocols[1]
   df$protocol_type <- stats::relevel(df$protocol_type, ref = ref_proto)
 
-  time_knots <- list(time_observations_started = c(0, 24))
+  time_knots <- list(time_observations_started = c(0, 24),
+                     day_of_year               = c(0, 365))
 
   message("Fitting negative-binomial GAM (", nrow(df), " checklists)...")
 

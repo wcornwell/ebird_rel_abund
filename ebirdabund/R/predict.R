@@ -1,16 +1,3 @@
-# Scan 300 evenly-spaced start times (0-24 h) and return the time
-# whose lower confidence limit is maximised -- a conservative peak.
-find_peak_time <- function(model, template_row) {
-  times   <- seq(0, 24, length.out = 300)
-  df_scan <- template_row[rep(1L, 300L), ]
-  df_scan$time_observations_started <- times
-
-  preds <- mgcv::predict.gam(
-    model, newdata = df_scan, type = "link", se.fit = TRUE
-  )
-  times[which.max(preds$fit - preds$se.fit)]
-}
-
 # Convenience: get the reference protocol_type used during model fitting.
 ref_protocol <- function(model) {
   lvls <- levels(model$model$protocol_type)
@@ -48,18 +35,15 @@ predict_abundance <- function(model, pred_surface, polygon,
   if (median_doy == 0L) median_doy <- 365L
   message(sprintf("Standard DOY: %d (circular mean of detections)", median_doy))
 
-  template <- pred_surface[1L, , drop = FALSE]
-  template$day_of_year          <- median_doy
-  template$duration_minutes     <- 60
-  template$effort_distance_km   <- 1
-  template$number_observers     <- 1
-  template$protocol_type        <- factor(
-    proto, levels = levels(train$protocol_type)
-  )
-
   if (is.null(peak_time)) {
-    peak_time <- 6.0
-    message("Standard observation time: 06:00")
+    time_circ_mean <- function(t) {
+      theta <- t * 2 * pi / 24
+      C <- mean(cos(theta), na.rm = TRUE)
+      S <- mean(sin(theta), na.rm = TRUE)
+      ((atan2(S, C) * 24 / (2 * pi)) %% 24 + 24) %% 24
+    }
+    peak_time <- time_circ_mean(ref_rows$time_observations_started)
+    message(sprintf("Peak observation time: %.2f (circular mean of detections)", peak_time))
   }
 
   # Add standard-effort columns to full prediction surface
@@ -90,7 +74,9 @@ predict_abundance <- function(model, pred_surface, polygon,
   log_cap   <- log(max(obs_cap, 1))
   fit_capped       <- pmin(as.numeric(preds$fit), log_cap)
   pred_data$abd    <- exp(fit_capped)
-  pred_data$abd_se <- exp(fit_capped) * as.numeric(preds$se.fit)
+  # Store SE on the link (log) scale so callers can form correct asymmetric
+  # CIs: [abd * exp(-z * abd_se), abd * exp(+z * abd_se)]
+  pred_data$abd_se <- as.numeric(preds$se.fit)
 
   # Build raster from an explicit bounding-box template so that concave
   # polygon sections don't leave NA gap rows in the output.
