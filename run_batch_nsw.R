@@ -124,55 +124,61 @@ message(sprintf("Taxonomy loaded: %d species", nrow(taxonomy)))
 
 # ── Batch run ─────────────────────────────────────────────────────────────────
 message(sprintf("\nStarting batch of %d species...", length(species_list)))
-t_start <- proc.time()[["elapsed"]]
 
-results <- estimate_abundance_batch(
-  polygon      = nsw,
-  ebird_zip    = EBD,
-  sampling_txt = SAMP,
-  species_list = species_list,
-  taxonomy     = taxonomy,
-  cov_stack    = cov,
-  cache_dir    = CACHE,
-  grid_res_km  = c(3, 9),
-  botw_path    = BOTW_PATH,
-  output_dir   = OUTPUT_DIR
-)
+if (length(species_list) == 0) {
+  message("All species already completed, skipping batch run.")
+  log_df <- if (file.exists(LOG_FILE)) read.csv(LOG_FILE, stringsAsFactors = FALSE) else data.frame()
+  t_total <- 0
+} else {
+  t_start <- proc.time()[["elapsed"]]
 
-t_total <- proc.time()[["elapsed"]] - t_start
+  results <- estimate_abundance_batch(
+    polygon      = nsw,
+    ebird_zip    = EBD,
+    sampling_txt = SAMP,
+    species_list = species_list,
+    taxonomy     = taxonomy,
+    cov_stack    = cov,
+    cache_dir    = CACHE,
+    grid_res_km  = c(3, 9),
+    botw_path    = BOTW_PATH,
+    output_dir   = OUTPUT_DIR
+  )
 
-# ── Write summary CSV ─────────────────────────────────────────────────────────
-log_df  <- data.frame(
-  common_name   = names(results),
-  status        = vapply(results, function(r) {
-    if (inherits(r, "error"))    "failed"
-    else if (isTRUE(r$excluded)) "excluded"
-    else "ok"
-  }, character(1)),
-  n_checklists  = vapply(results, function(r) {
-    if (inherits(r, "error")) NA_integer_ else r$n_checklists
-  }, integer(1)),
-  dev_expl      = vapply(results, function(r) {
-    if (inherits(r, "error")) NA_real_ else r$dev_expl
-  }, numeric(1)),
-  model_sum     = vapply(results, function(r) {
-    if (inherits(r, "error")) NA_real_ else r$model_sum
-  }, numeric(1)),
-  error_message = vapply(results, function(r) {
-    if (inherits(r, "error")) conditionMessage(r) else NA_character_
-  }, character(1)),
-  stringsAsFactors = FALSE
-)
-# Merge with prior runs so the CSV always covers all species ever processed
-if (file.exists(LOG_FILE)) {
-  prior  <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
-  # align columns (prior runs may have fewer columns)
-  for (col in setdiff(names(log_df), names(prior))) prior[[col]] <- NA
-  log_df <- rbind(prior[!prior$common_name %in% log_df$common_name,
-                         names(log_df)],
-                  log_df)
+  t_total <- proc.time()[["elapsed"]] - t_start
+
+  # ── Write summary CSV ───────────────────────────────────────────────────────
+  log_df <- data.frame(
+    common_name   = names(results),
+    status        = vapply(results, function(r) {
+      if (inherits(r, "error"))    "failed"
+      else if (isTRUE(r$excluded)) "excluded"
+      else "ok"
+    }, character(1)),
+    n_checklists  = vapply(results, function(r) {
+      if (inherits(r, "error")) NA_integer_ else r$n_checklists
+    }, integer(1)),
+    dev_expl      = vapply(results, function(r) {
+      if (inherits(r, "error")) NA_real_ else r$dev_expl
+    }, numeric(1)),
+    model_sum     = vapply(results, function(r) {
+      if (inherits(r, "error")) NA_real_ else r$model_sum
+    }, numeric(1)),
+    error_message = vapply(results, function(r) {
+      if (inherits(r, "error")) conditionMessage(r) else NA_character_
+    }, character(1)),
+    stringsAsFactors = FALSE
+  )
+  # Merge with prior runs so the CSV always covers all species ever processed
+  if (file.exists(LOG_FILE)) {
+    prior  <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
+    for (col in setdiff(names(log_df), names(prior))) prior[[col]] <- NA
+    log_df <- rbind(prior[!prior$common_name %in% log_df$common_name,
+                           names(log_df)],
+                    log_df)
+  }
+  write.csv(log_df, LOG_FILE, row.names = FALSE)
 }
-write.csv(log_df, LOG_FILE, row.names = FALSE)
 
 # ── Build per-resolution raster stacks ───────────────────────────────────────
 message("\nBuilding species abundance stacks...")
