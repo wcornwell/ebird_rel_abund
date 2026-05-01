@@ -1,0 +1,61 @@
+# =============================================================================
+# System
+# =============================================================================
+.DS_Store
+Rplots.pdf
+
+# =============================================================================
+# Large data files
+# =============================================================================
+ebirdabund_cache/*
+ebirdabund/ebirdabund_cache/*
+ebirdabund/raw_data/*
+botw_species/BOTW_2025.gpkg
+botw_species/Metadata_BirdLife_HBW_Bird_Maps_2025.docx
+botw_species/Handbook of the Birds of the World and BirdLife International Digital Checklist of the Birds of the World_Version_10.xlsx
+RenewableEnergyZones_Spatial/
+nsw_species_list.csv
+nsw_ebird_taxonomy.csv
+nsw_species_rarity_cutoff.png
+
+# =============================================================================
+# Output maps and plots
+# =============================================================================
+species_maps/*
+species_maps_old/*
+rez_plots/
+
+# =============================================================================
+# Claude internals
+# =============================================================================
+.claude/scheduled_tasks.lock
+ebirdabund/memory/
+
+# =============================================================================
+# Local testing — scripts, data, and output images
+# =============================================================================
+test_nsw.R
+test_pop_density.R
+test_count_filter.R
+test_tweedie_vs_nb.R
+pop_density_test_result.rds
+workflow_comparison.md
+batch_nsw_output.log
+nsw_species_list.R
+
+# test output images
+test_filter_*.png
+test_filter_map_*.png
+abundance_comparison_nsw.png
+circle_abundance_*.png
+plumed_whistling_duck.png
+
+# =============================================================================
+# Archived / old files
+# =============================================================================
+06_abundance.Rmd
+Superb Fairywren_nsw.png
+sfairy_nsw.png
+slyre_nsw.png
+sparrot_nsw.png
+wtnt_nsw.png
