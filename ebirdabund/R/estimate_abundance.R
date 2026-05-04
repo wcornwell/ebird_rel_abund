@@ -94,17 +94,27 @@ fit_species_model <- function(polygon,
   message("\n── Step 4/4: Spatiotemporal subsampling ─────────────────────")
   ebird_ss <- subsample_hex(ebird_df, spacing_km = hex_spacing_km)
 
-  if (nrow(ebird_ss) < 50) {
-    warning(
-      "Only ", nrow(ebird_ss), " checklists after subsampling — ",
-      "model estimates may be unreliable."
+  n_pos_ss <- sum(ebird_ss$observation_count > 0L)
+  if (n_pos_ss < 50L) {
+    cond <- structure(
+      class = c("ebirdabund_excluded", "error", "condition"),
+      list(
+        message          = sprintf(
+          "Insufficient detections: only %d positive checklists after subsampling (need >= 50).",
+          n_pos_ss
+        ),
+        exclusion_reason = "insufficient_detections",
+        n_checklists     = nrow(ebird_ss),
+        n_positive       = n_pos_ss
+      )
     )
+    stop(cond)
   }
 
   message("\n── Fitting GAM ──────────────────────────────────────────────")
   gam_model <- fit_gam(ebird_ss)
   message(sprintf("Deviance explained: %.1f%%",
-                  summary(gam_model)$dev.expl * 100))
+                  suppressWarnings(summary(gam_model)$dev.expl) * 100))
 
   list(
     model     = gam_model,

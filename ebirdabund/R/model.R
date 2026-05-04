@@ -121,8 +121,8 @@ fit_gam <- function(df) {
 
 # Print a ranked table of predictor importance from a fitted GAM.
 print_predictor_importance <- function(mod) {
-  gam_sum  <- summary(mod)
-  gam_anov <- anova(mod)
+  gam_sum  <- suppressWarnings(summary(mod))
+  gam_anov <- suppressWarnings(anova(mod))
 
   # Smooth terms: EDF and approximate F from summary
   stbl <- as.data.frame(gam_sum$s.table)

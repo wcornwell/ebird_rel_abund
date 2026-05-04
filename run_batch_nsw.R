@@ -32,6 +32,17 @@ nsw_bbox <- as.numeric(sf::st_bbox(sf::st_transform(nsw, 4326)))
 # ── Skip already-completed species ────────────────────────────────────────────
 safe_name_local <- function(x) gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
 
+# ── Migrate log to current schema if it exists ────────────────────────────────
+LOG_COLS <- c("common_name", "scientific_name", "status", "exclusion_reason",
+              "run_date", "n_checklists", "n_positive", "dev_expl",
+              "model_sum", "error_message")
+if (file.exists(LOG_FILE)) {
+  prior_log <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
+  for (col in setdiff(LOG_COLS, names(prior_log))) prior_log[[col]] <- NA
+  prior_log <- prior_log[, LOG_COLS]
+  write.csv(prior_log, LOG_FILE, row.names = FALSE)
+}
+
 done_tif <- sub("[.]tif$", "",
                 list.files(file.path(OUTPUT_DIR, "3km"), pattern = "[.]tif$"))
 done_log <- character(0)
@@ -123,42 +134,11 @@ if (length(species_list) == 0) {
     cache_dir    = CACHE,
     grid_res_km  = GRID_RES_KM,
     botw_path    = BOTW_PATH,
-    output_dir   = OUTPUT_DIR
+    output_dir   = OUTPUT_DIR,
+    log_file     = LOG_FILE
   )
 
   t_total <- proc.time()[["elapsed"]] - t_start
-
-  # ── Write summary CSV ───────────────────────────────────────────────────────
-  log_df <- data.frame(
-    common_name   = names(results),
-    status        = vapply(results, function(r) {
-      if (inherits(r, "error"))    "failed"
-      else if (isTRUE(r$excluded)) "excluded"
-      else "ok"
-    }, character(1)),
-    n_checklists  = vapply(results, function(r) {
-      if (inherits(r, "error")) NA_integer_ else r$n_checklists
-    }, integer(1)),
-    dev_expl      = vapply(results, function(r) {
-      if (inherits(r, "error")) NA_real_ else r$dev_expl
-    }, numeric(1)),
-    model_sum     = vapply(results, function(r) {
-      if (inherits(r, "error")) NA_real_ else r$model_sum
-    }, numeric(1)),
-    error_message = vapply(results, function(r) {
-      if (inherits(r, "error")) conditionMessage(r) else NA_character_
-    }, character(1)),
-    stringsAsFactors = FALSE
-  )
-  # Merge with prior runs so the CSV always covers all species ever processed
-  if (file.exists(LOG_FILE)) {
-    prior  <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
-    for (col in setdiff(names(log_df), names(prior))) prior[[col]] <- NA
-    log_df <- rbind(prior[!prior$common_name %in% log_df$common_name,
-                           names(log_df)],
-                    log_df)
-  }
-  write.csv(log_df, LOG_FILE, row.names = FALSE)
 }
 
 # ── Build per-resolution raster stacks ───────────────────────────────────────
@@ -192,17 +172,30 @@ for (res_km in GRID_RES_KM) {
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
+log_df   <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
+# Summarise only this run's species (prior runs may already be in the log)
+run_log  <- log_df[log_df$common_name %in% species_df$common_name[
+                     species_df$reporting_rate >= 0.005], ]
+
 hrs      <- floor(t_total / 3600)
 mins     <- floor((t_total %% 3600) / 60)
 secs     <- round(t_total %% 60)
-n_ok     <- sum(log_df$status == "ok")
-n_excl   <- sum(log_df$status == "excluded")
-n_failed <- sum(log_df$status == "failed")
-mean_dev <- mean(log_df$dev_expl[log_df$status == "ok"], na.rm = TRUE)
+n_ok     <- sum(run_log$status == "ok")
+n_excl   <- sum(run_log$status == "excluded")
+n_failed <- sum(run_log$status == "failed")
+mean_dev <- mean(run_log$dev_expl[run_log$status == "ok"], na.rm = TRUE)
+
+excl_by_reason <- if (n_excl > 0) {
+  excl <- run_log[run_log$status == "excluded", ]
+  by_r <- tapply(excl$common_name, excl$exclusion_reason,
+                 function(x) paste(x, collapse = ", "))
+  paste(names(by_r), by_r, sep = ": ", collapse = "\n  ")
+} else "none"
+
 cat(sprintf(
-  "\n════════════════════════════════════════\n%d ok  |  %d excluded  |  %d failed  |  %dh %02dm %02ds  |  mean dev.expl = %.3f\nExcluded: %s\nFailed: %s\nLog: %s\n",
+  "\n════════════════════════════════════════\n%d ok  |  %d excluded  |  %d failed  |  %dh %02dm %02ds  |  mean dev.expl = %.3f\nExclusions:\n  %s\nFailed: %s\nLog: %s\n",
   n_ok, n_excl, n_failed, hrs, mins, secs, mean_dev,
-  if (n_excl  > 0) paste(log_df$common_name[log_df$status == "excluded"], collapse = ", ") else "none",
-  if (n_failed > 0) paste(log_df$common_name[log_df$status == "failed"],  collapse = ", ") else "none",
+  excl_by_reason,
+  if (n_failed > 0) paste(run_log$common_name[run_log$status == "failed"], collapse = ", ") else "none",
   LOG_FILE
 ))

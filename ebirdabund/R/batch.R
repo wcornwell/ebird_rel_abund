@@ -82,7 +82,8 @@ estimate_abundance_batch <- function(
     botw_path        = NULL,
     range_resolution = "27km",
     n_cores          = max(1L, parallel::detectCores() - 1L),
-    output_dir       = NULL) {
+    output_dir       = NULL,
+    log_file         = NULL) {
 
   # ── Validation ───────────────────────────────────────────────────────────────
   if (!is.character(species_list) || length(species_list) == 0L) {
@@ -186,10 +187,12 @@ estimate_abundance_batch <- function(
 
     dev_expl <- tryCatch(summary(model_fit$model)$dev.expl, warning = function(w) NA_real_)
     if (is.nan(dev_expl)) dev_expl <- NA_real_
-    list(n_checklists = nrow(model_fit$data),
-         dev_expl     = dev_expl,
-         model_sum    = model_sum,
-         excluded     = excluded)
+    list(n_checklists     = nrow(model_fit$data),
+         n_positive       = sum(model_fit$data$observation_count > 0L),
+         dev_expl         = dev_expl,
+         model_sum        = model_sum,
+         excluded         = excluded,
+         exclusion_reason = if (excluded) "negligible_abundance" else NA_character_)
   }
 
   # Named vector: common_name -> scientific_name (NA if unknown)
@@ -199,9 +202,63 @@ estimate_abundance_batch <- function(
     setNames(rep(NA_character_, length(species_list)), species_list)
   }
 
+  # Format one result as a single-row data.frame for the log.
+  make_log_row <- function(sp, res) {
+    if (inherits(res, "error")) {
+      data.frame(
+        common_name      = sp,
+        scientific_name  = unname(sci_lookup[sp]),
+        status           = "failed",
+        exclusion_reason = NA_character_,
+        run_date         = format(Sys.Date(), "%Y-%m-%d"),
+        n_checklists     = NA_integer_,
+        n_positive       = NA_integer_,
+        dev_expl         = NA_real_,
+        model_sum        = NA_real_,
+        error_message    = conditionMessage(res),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      data.frame(
+        common_name      = sp,
+        scientific_name  = unname(sci_lookup[sp]),
+        status           = if (isTRUE(res$excluded)) "excluded" else "ok",
+        exclusion_reason = res$exclusion_reason,
+        run_date         = format(Sys.Date(), "%Y-%m-%d"),
+        n_checklists     = res$n_checklists,
+        n_positive       = res$n_positive,
+        dev_expl         = res$dev_expl,
+        model_sum        = res$model_sum,
+        error_message    = NA_character_,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+
+  # Append one row to the log CSV; write header only on first write.
+  write_log_row <- function(sp, res) {
+    if (is.null(log_file)) return(invisible(NULL))
+    row <- make_log_row(sp, res)
+    if (!file.exists(log_file)) {
+      write.csv(row, log_file, row.names = FALSE)
+    } else {
+      write.table(row, log_file, sep = ",", col.names = FALSE,
+                  row.names = FALSE, append = TRUE, quote = TRUE)
+    }
+  }
+
   run_one <- function(species, cov) {
     tryCatch(
       run_species(species, cov),
+      ebirdabund_excluded = function(e) {
+        message(sprintf("  [EXCLUDED] %s: %s", species, conditionMessage(e)))
+        list(excluded         = TRUE,
+             exclusion_reason = e$exclusion_reason,
+             n_checklists     = e$n_checklists,
+             n_positive       = e$n_positive,
+             dev_expl         = NA_real_,
+             model_sum        = NA_real_)
+      },
       error = function(e) {
         message(sprintf("  [FAILED] %s: %s", species, conditionMessage(e)))
         e
@@ -219,6 +276,7 @@ estimate_abundance_batch <- function(
   t_batch_start <- proc.time()[["elapsed"]]
 
   results[[1]] <- run_one(species_list[1], cov_stack)
+  write_log_row(species_list[1], results[[1]])
 
   t_single <- proc.time()[["elapsed"]] - t_batch_start
 
@@ -291,19 +349,27 @@ estimate_abundance_batch <- function(
 
   # Workers fit once and predict at all resolutions, saving to disk immediately.
   # Only a lightweight summary is returned over the socket (no raster transfer).
-  remaining <- parallel::parLapplyLB(
-    cl,
-    species_list[-1],
-    function(sp) {
-      cov <- if (!is.null(wrapped_cov)) terra::unwrap(wrapped_cov) else NULL
-      tryCatch(run_species(sp, cov), error = function(e) e)
-    }
-  )
+  # Process in chunks of `workers` so results are logged after each chunk —
+  # a crash loses at most one chunk's worth of records.
+  remaining_spp <- species_list[-1]
+  chunks <- split(remaining_spp,
+                  ceiling(seq_along(remaining_spp) / workers))
 
-  for (i in seq_along(remaining)) {
-    sp  <- species_list[i + 1L]
-    res <- remaining[[i]]
-    results[[sp]] <- res
+  for (chunk in chunks) {
+    chunk_res <- parallel::parLapplyLB(
+      cl,
+      chunk,
+      function(sp) {
+        cov <- if (!is.null(wrapped_cov)) terra::unwrap(wrapped_cov) else NULL
+        tryCatch(run_species(sp, cov), error = function(e) e)
+      }
+    )
+    for (i in seq_along(chunk)) {
+      sp  <- chunk[i]
+      res <- chunk_res[[i]]
+      results[[sp]] <- res
+      write_log_row(sp, res)
+    }
   }
 
   # ── Summary ───────────────────────────────────────────────────────────────────
