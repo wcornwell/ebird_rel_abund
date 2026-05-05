@@ -11,18 +11,28 @@ build_gam_formula <- function(df, hab_cols) {
     sprintf("s(day_of_year, bs = 'cc', k = %d)",
             sk("day_of_year", 10L)),
     sprintf("s(time_observations_started, bs = 'cc', k = %d)",
-            sk("time_observations_started", 4L)),
-    sprintf("s(duration_minutes, k = %d)",
+            sk("time_observations_started", 10L)),
+    sprintf("s(log(duration_minutes), k = %d)",
             sk("duration_minutes", 4L)),
-    sprintf("s(effort_distance_km, k = %d)",
+    sprintf("s(log1p(effort_distance_km), k = %d)",
             sk("effort_distance_km", 4L)),
     sprintf("s(number_observers, k = %d)",
             sk("number_observers", 4L)),
     "protocol_type"
   )
 
+  # Right-skewed covariates spanning wide ranges benefit from log scaling so
+  # knots are distributed more evenly across the data.
+  log1p_cols <- "pop_density"   # includes zeros
+  log_cols   <- "precip_annual" # strictly positive
+  k6_cols    <- c("elevation", "precip_annual", "temp_annual")
+
   hab_terms <- vapply(hab_cols, function(col) {
-    sprintf("s(%s, k = %d)", col, safe_k(df[[col]], 4L))
+    var <- if (col %in% log1p_cols) sprintf("log1p(%s)", col)
+           else if (col %in% log_cols) sprintf("log(%s)", col)
+           else col
+    k   <- if (col %in% k6_cols) 6L else 4L
+    sprintf("s(%s, k = %d)", var, safe_k(df[[col]], k))
   }, character(1))
 
   stats::as.formula(
