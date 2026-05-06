@@ -23,8 +23,8 @@ build_gam_formula <- function(df, hab_cols) {
 
   # Right-skewed covariates spanning wide ranges benefit from log scaling so
   # knots are distributed more evenly across the data.
-  log1p_cols <- "pop_density"   # includes zeros
-  log_cols   <- "precip_annual" # strictly positive
+  log1p_cols <- c("pop_density", "tree_height")  # include zeros
+  log_cols   <- "precip_annual"                  # strictly positive
   k6_cols    <- c("elevation", "precip_annual", "temp_annual")
 
   hab_terms <- vapply(hab_cols, function(col) {
@@ -45,7 +45,7 @@ build_gam_formula <- function(df, hab_cols) {
 # Returns the fitted mgcv::gam object.
 fit_gam <- function(df) {
   hab_cols <- grep(
-    "^(lc_|elevation|precip_|temp_|pop_|water_)", names(df), value = TRUE
+    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height)", names(df), value = TRUE
   )
   hab_cols <- setdiff(hab_cols, "lc_shrubs")
 

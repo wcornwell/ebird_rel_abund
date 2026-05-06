@@ -1,54 +1,167 @@
-# Read the sampling events file (316 MB), filter to complete checklists within
-# the bounding box, and return a plain data.frame with renamed columns.
+# Expected EBD column positions used by the package. Validated by
+# validate_ebd_header() before any fread call relies on integer indices.
+EBD_EXPECTED_COLS <- c(
+  "6"  = "COMMON NAME",
+  "11" = "OBSERVATION COUNT",
+  "35" = "SAMPLING EVENT IDENTIFIER"
+)
+
+# Validate that an EBD file has the expected column names at the expected
+# positions. eBird occasionally adds columns; any drift would silently
+# corrupt the integer-column reads in read_ebd_observations() and the
+# pre-cache block of run_batch_*.R.
+#
+# Reads only the first line of the file (cheap, no full scan).
+# Returns invisibly TRUE on success; stops with a diagnostic on failure.
+validate_ebd_header <- function(ebd_path,
+                                expected = EBD_EXPECTED_COLS) {
+  con <- file(ebd_path, "r")
+  on.exit(close(con), add = TRUE)
+  header_line <- readLines(con, n = 1L)
+  if (length(header_line) == 0L) {
+    stop("EBD file appears empty or unreadable: ", ebd_path)
+  }
+  cols <- strsplit(header_line, "\t", fixed = TRUE)[[1L]]
+
+  for (idx_chr in names(expected)) {
+    i        <- as.integer(idx_chr)
+    expected_name <- expected[[idx_chr]]
+    actual_name   <- if (i > length(cols)) NA_character_ else cols[i]
+    if (is.na(actual_name) || actual_name != expected_name) {
+      stop(sprintf(
+        paste0(
+          "EBD header check failed for %s\n",
+          "  Expected col %d = '%s'; got '%s'.\n",
+          "  Column layout differs from the reference EBD release.\n",
+          "  Update EBD_EXPECTED_COLS in R/load_ebird.R after confirming new positions."
+        ),
+        ebd_path, i, expected_name,
+        if (is.na(actual_name)) "<missing>" else actual_name
+      ))
+    }
+  }
+  invisible(TRUE)
+}
+
+# Read sampling events from one or more eBird sampling files, filter to
+# complete checklists within `bbox`, optionally cap by `date_cutoff`, and
+# return a single combined data.frame with renamed columns.
+#
+# sampling_txt : character vector (length >= 1) of sampling .txt paths.
+# bbox         : c(xmin, ymin, xmax, ymax) in WGS84.
+# date_cutoff  : optional Date or character "YYYY-MM-DD". Rows with
+#                observation_date strictly later than this are dropped.
 #
 # Strategy: read all columns (avoids fread column-order ambiguity), then
 # filter and select with standard R [[ ]] — no data.table NSE needed.
-read_sampling <- function(sampling_txt, bbox) {
-  message("Reading sampling events file...")
-  df <- as.data.frame(data.table::fread(
-    sampling_txt, sep = "\t", quote = "", showProgress = FALSE, na.strings = ""
+read_sampling <- function(sampling_txt, bbox, date_cutoff = NULL) {
+  if (!is.character(sampling_txt) || length(sampling_txt) == 0L) {
+    stop("`sampling_txt` must be a non-empty character vector of file paths.")
+  }
+  if (!is.null(date_cutoff)) {
+    date_cutoff <- as.Date(date_cutoff)
+    if (is.na(date_cutoff)) {
+      stop("`date_cutoff` could not be parsed as a Date.")
+    }
+  }
+
+  read_one <- function(p) {
+    if (!file.exists(p)) stop("Sampling events file not found: ", p)
+    df <- as.data.frame(data.table::fread(
+      p, sep = "\t", quote = "", showProgress = FALSE, na.strings = ""
+    ))
+
+    # Standard R subsetting — no NSE, no backtick issues
+    df <- df[df[["ALL SPECIES REPORTED"]] == 1 &
+             !is.na(df[["LATITUDE"]]) &
+             df[["LATITUDE"]]  >= bbox[2] & df[["LATITUDE"]]  <= bbox[4] &
+             df[["LONGITUDE"]] >= bbox[1] & df[["LONGITUDE"]] <= bbox[3], ]
+
+    raw <- c("SAMPLING EVENT IDENTIFIER", "LATITUDE", "LONGITUDE",
+             "OBSERVATION DATE", "TIME OBSERVATIONS STARTED",
+             "DURATION MINUTES", "EFFORT DISTANCE KM",
+             "NUMBER OBSERVERS", "PROTOCOL NAME")
+    df  <- df[, raw, drop = FALSE]
+    names(df) <- c("checklist_id", "latitude", "longitude",
+                   "observation_date", "time_observations_started",
+                   "duration_minutes", "effort_distance_km",
+                   "number_observers", "protocol_type")
+    df
+  }
+
+  message(sprintf(
+    "Reading %d sampling event file(s)...", length(sampling_txt)
   ))
+  parts <- lapply(sampling_txt, read_one)
+  combined <- if (length(parts) == 1L) parts[[1L]] else do.call(rbind, parts)
 
-  # Standard R subsetting — no NSE, no backtick issues
-  df <- df[df[["ALL SPECIES REPORTED"]] == 1 &
-           !is.na(df[["LATITUDE"]]) &
-           df[["LATITUDE"]]  >= bbox[2] & df[["LATITUDE"]]  <= bbox[4] &
-           df[["LONGITUDE"]] >= bbox[1] & df[["LONGITUDE"]] <= bbox[3], ]
+  if (!is.null(date_cutoff)) {
+    obs_date <- as.Date(combined$observation_date)
+    keep     <- !is.na(obs_date) & obs_date <= date_cutoff
+    n_drop   <- sum(!keep)
+    combined <- combined[keep, ]
+    if (n_drop > 0L) {
+      message(sprintf(
+        "  Dropped %d sampling rows after %s (date cutoff)",
+        n_drop, format(date_cutoff, "%Y-%m-%d")
+      ))
+    }
+  }
 
-  raw <- c("SAMPLING EVENT IDENTIFIER", "LATITUDE", "LONGITUDE",
-           "OBSERVATION DATE", "TIME OBSERVATIONS STARTED",
-           "DURATION MINUTES", "EFFORT DISTANCE KM",
-           "NUMBER OBSERVERS", "PROTOCOL NAME")
-  df  <- df[, raw, drop = FALSE]
-  names(df) <- c("checklist_id", "latitude", "longitude",
-                 "observation_date", "time_observations_started",
-                 "duration_minutes", "effort_distance_km",
-                 "number_observers", "protocol_type")
-  df
+  combined
 }
 
-# Scan the EBD observations file for a single species.
-# Uses integer column indices (not names) to avoid fread's select-vs-file-order
-# ambiguity. Positions verified against the Feb-2026 EBD header:
-#   col 6  = COMMON NAME
-#   col 11 = OBSERVATION COUNT
-#   col 35 = SAMPLING EVENT IDENTIFIER
+# Read raw observations (common_name, observation_count, checklist_id) from
+# one or more EBD .txt files in a single concatenated pass. The column-index
+# integer reads (cols 6/11/35) are validated against each file's header
+# before fread is called.
+#
+# ebd_txt              : character vector (length >= 1) of EBD .txt paths.
+# species_set          : optional character vector. If non-NULL, only rows
+#                        whose `common_name` is in this set are kept.
+# valid_checklist_ids  : optional character vector. If non-NULL, only rows
+#                        whose `checklist_id` is in this set are kept.
+#
+# Returns a data.frame with columns common_name, observation_count, checklist_id.
+read_ebd_observations <- function(ebd_txt,
+                                  species_set         = NULL,
+                                  valid_checklist_ids = NULL) {
+  if (!is.character(ebd_txt) || length(ebd_txt) == 0L) {
+    stop("`ebd_txt` must be a non-empty character vector of file paths.")
+  }
+
+  read_one <- function(p) {
+    p_resolved <- resolve_ebird_path(p)
+    validate_ebd_header(p_resolved)
+    message("  Scanning EBD: ", basename(p_resolved))
+    df <- as.data.frame(data.table::fread(
+      p_resolved,
+      select       = c(6L, 11L, 35L),
+      sep          = "\t",
+      quote        = "",
+      showProgress = TRUE,
+      na.strings   = ""
+    ))
+    names(df) <- c("common_name", "observation_count", "checklist_id")
+    if (!is.null(species_set)) {
+      df <- df[df[["common_name"]] %in% species_set, , drop = FALSE]
+    }
+    if (!is.null(valid_checklist_ids)) {
+      df <- df[df[["checklist_id"]] %in% valid_checklist_ids, , drop = FALSE]
+    }
+    df
+  }
+
+  parts <- lapply(ebd_txt, read_one)
+  if (length(parts) == 1L) parts[[1L]] else do.call(rbind, parts)
+}
+
+# Single-species wrapper kept for backward compatibility with load_ebird()'s
+# fallback path. Returns checklist_id + observation_count only.
 read_ebd_species <- function(ebd_txt, species) {
   message("Scanning EBD file for '", species, "' (large file, please wait)...")
-  df <- as.data.frame(data.table::fread(
-    ebd_txt,
-    select       = c(6L, 11L, 35L),
-    sep          = "\t",
-    quote        = "",
-    showProgress = TRUE,
-    na.strings   = ""
-  ))
-  # fread returns columns in file order: COMMON NAME, OBSERVATION COUNT,
-  # SAMPLING EVENT IDENTIFIER
-  names(df) <- c("common_name", "observation_count", "checklist_id")
-  df <- df[df[["common_name"]] == species, c("checklist_id", "observation_count"),
-           drop = FALSE]
-  df
+  df <- read_ebd_observations(ebd_txt, species_set = species)
+  df[, c("checklist_id", "observation_count"), drop = FALSE]
 }
 
 # Left-join all complete checklists with species observations.

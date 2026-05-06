@@ -104,7 +104,13 @@ evaluate_model_cv <- function(df, formula = NULL, k = 5L, seed = 42L) {
     }
     ll_mod  <- nb_ll(obs, pred)
     ll_null <- nb_ll(obs, rep(mu_null, length(obs)))
-    ll_sat  <- nb_ll(obs, pmax(obs, 0.5))  # saturated: mu = y (avoid log(0))
+    # Saturated model: mu = obs. For obs = 0, P(0 | NB(0, θ)) = 1 so ll = 0;
+    # only non-zero observations contribute. Using pmax(obs, 0.5) for zeros
+    # gives mu >> true optimum and makes ll_sat < ll_null for sparse species,
+    # flipping the denominator sign and blowing up the ratio.
+    ll_sat  <- if (any(obs > 0))
+      sum(stats::dnbinom(obs[obs > 0], mu = obs[obs > 0], size = theta, log = TRUE))
+    else 0
     dev_expl <- (ll_mod - ll_null) / (ll_sat - ll_null)
 
     data.frame(

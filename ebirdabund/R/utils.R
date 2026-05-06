@@ -14,6 +14,53 @@ safe_name <- function(x) {
   gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
 }
 
+# Buffer a polygon by `buffer_km` kilometres using a metric projection.
+#
+# polygon       : sf or sfc (any CRS).
+# buffer_km     : single non-negative numeric, buffer distance in km.
+# land_polygon  : optional sf polygon to intersect with after buffering
+#                 (e.g., AU mainland) so the fit region doesn't extend
+#                 indefinitely over open ocean.
+# proj_crs      : metric CRS used for the buffer step. Default is
+#                 EPSG:3577 (GDA94 / Australian Albers); override for other
+#                 regions.
+#
+# Returns an sf object in WGS84 (EPSG:4326).
+make_fit_polygon <- function(polygon,
+                             buffer_km,
+                             land_polygon = NULL,
+                             proj_crs     = "EPSG:3577") {
+  if (!inherits(polygon, c("sf", "sfc"))) {
+    stop("`polygon` must be an sf or sfc object.")
+  }
+  if (!is.numeric(buffer_km) || length(buffer_km) != 1L || is.na(buffer_km) ||
+      buffer_km < 0) {
+    stop("`buffer_km` must be a single non-negative numeric value.")
+  }
+
+  buffered <- sf::st_transform(polygon, proj_crs)
+  buffered <- sf::st_buffer(buffered, dist = buffer_km * 1000)
+  buffered <- sf::st_transform(buffered, 4326)
+
+  if (!is.null(land_polygon)) {
+    if (!inherits(land_polygon, c("sf", "sfc"))) {
+      stop("`land_polygon` must be an sf or sfc object.")
+    }
+    land_wgs <- sf::st_transform(land_polygon, 4326)
+    # BirdLife / GADM polygons often have near-duplicate vertices that the S2
+    # spherical engine rejects. Disable S2 so GEOS handles the repair.
+    old_s2 <- sf::sf_use_s2()
+    sf::sf_use_s2(FALSE)
+    on.exit(sf::sf_use_s2(old_s2), add = TRUE)
+    buffered <- sf::st_intersection(
+      sf::st_make_valid(buffered),
+      sf::st_make_valid(land_wgs)
+    )
+  }
+
+  buffered
+}
+
 # Try to load a range polygon from ebirdst.
 # Returns an sf object (possibly multi-row, one per season) or NULL.
 load_range_ebirdst <- function(species, resolution) {
