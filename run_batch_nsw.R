@@ -121,6 +121,9 @@ message("Preparing covariates...")
 cov <- prepare_covariates(polygon, cache_dir = CACHE)
 message("Covariate layers: ", paste(names(cov), collapse = ", "))
 
+# ── Sampling master (one-time covariate extraction, reused by all species) ────
+prepare_sampling_master(SAMP, polygon, cov, ZEROFILL_CACHE)
+
 # ── Taxonomy (common name -> scientific name for BOTW range lookup) ───────────
 taxonomy <- read.csv(TAXONOMY, stringsAsFactors = FALSE)
 message(sprintf("Taxonomy loaded: %d species", nrow(taxonomy)))

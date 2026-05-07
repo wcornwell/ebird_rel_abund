@@ -74,6 +74,9 @@ if (length(needs_cache) > 0) {
 message("Preparing covariates...")
 cov <- prepare_covariates(polygon, cache_dir = CACHE)
 
+# ── Sampling master ───────────────────────────────────────────────────────────
+prepare_sampling_master(SAMP, polygon, cov, ZEROFILL_CACHE)
+
 # ── Taxonomy ──────────────────────────────────────────────────────────────────
 taxonomy <- read.csv(TAXONOMY, stringsAsFactors = FALSE)
 

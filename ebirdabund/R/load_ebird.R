@@ -213,15 +213,82 @@ clean_ebird <- function(zf) {
     dplyr::filter(.data$observation_count <= 200)
 }
 
+# Build a sampling master: raw sampling rows clipped to polygon with covariates
+# pre-extracted. Saved as {cache_dir}/sampling_master.rds.
+#
+# When the master exists, load_ebird() uses a fast path that skips
+# extract_covariates(), st_filter(), and drop_na() per species — replacing
+# 475 terra::extract calls with one.
+#
+# Call this after prepare_covariates() and the zerofill pre-cache, before
+# estimate_abundance_batch().
+#' @export
+prepare_sampling_master <- function(sampling_txt, polygon, cov_stack, cache_dir) {
+  master_f <- file.path(cache_dir, "sampling_master.rds")
+  if (file.exists(master_f)) {
+    message("Sampling master already exists: ", master_f)
+    return(invisible(readRDS(master_f)))
+  }
+
+  polygon_wgs84 <- sf::st_transform(polygon, 4326)
+  bbox          <- as.numeric(sf::st_bbox(polygon_wgs84))
+
+  message("Building sampling master (one-time covariate extraction for all species)...")
+  samp <- read_sampling(sampling_txt, bbox)
+
+  # Spatial clip (keeps only checklists inside the polygon, not just the bbox)
+  samp_sf <- sf::st_as_sf(samp, coords = c("longitude", "latitude"),
+                           crs = 4326, remove = FALSE)
+  samp    <- sf::st_drop_geometry(sf::st_filter(samp_sf, polygon_wgs84))
+
+  # Extract covariates once for all checklist locations
+  samp <- extract_covariates(samp, cov_stack)
+
+  # Drop rows where covariates are missing (ocean edges, raster gaps)
+  cov_cols <- grep(
+    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height)",
+    names(samp), value = TRUE
+  )
+  n_before <- nrow(samp)
+  samp     <- tidyr::drop_na(samp, dplyr::all_of(cov_cols))
+  if (nrow(samp) < n_before)
+    message(sprintf("  Dropped %d checklists with missing covariates (%d remaining).",
+                    n_before - nrow(samp), nrow(samp)))
+
+  saveRDS(samp, master_f)
+  message(sprintf("Sampling master saved: %d checklists → %s", nrow(samp), master_f))
+  invisible(samp)
+}
+
 # Main loader: read, zero-fill, clean, clip to polygon.
+# If a sampling_master.rds exists in cache_dir, uses a fast path that skips
+# extract_covariates(), st_filter(), and drop_na(cov_cols) — the expensive
+# steps that are identical across all species.
 # Returns a flat data.frame with one row per checklist.
 load_ebird <- function(polygon, ebird_zip, sampling_txt, species, cache_dir) {
   polygon_wgs84 <- sf::st_transform(polygon, 4326)
-  bb <- as.numeric(sf::st_bbox(polygon_wgs84))  # xmin ymin xmax ymax
+  bb <- as.numeric(sf::st_bbox(polygon_wgs84))
 
-  spp     <- safe_name(species)
-  cache_f <- file.path(cache_dir, sprintf("zerofilled_%s.rds", spp))
+  spp      <- safe_name(species)
+  cache_f  <- file.path(cache_dir, sprintf("zerofilled_%s.rds", spp))
+  master_f <- file.path(cache_dir, "sampling_master.rds")
 
+  # ── Fast path: sampling master available ─────────────────────────────────
+  if (file.exists(master_f) && file.exists(cache_f)) {
+    message("Loading sampling master + per-species obs for '", species, "'.")
+    master  <- readRDS(master_f)
+    obs     <- readRDS(cache_f)[, c("checklist_id", "observation_count"),
+                                drop = FALSE]
+    zf      <- merge(master, obs, by = "checklist_id", all.x = TRUE)
+    zf$observation_count[is.na(zf$observation_count)] <- "0"
+    zf$species_observed <- zf$observation_count != "0"
+    zf <- clean_ebird(zf)
+    message(sprintf("Loaded %d checklists (%d with detections) inside polygon.",
+                    nrow(zf), sum(zf$species_observed)))
+    return(zf)
+  }
+
+  # ── Slow path: build from scratch ────────────────────────────────────────
   if (file.exists(cache_f)) {
     message("Loading cached zero-filled data for '", species, "'.")
     zf <- readRDS(cache_f)

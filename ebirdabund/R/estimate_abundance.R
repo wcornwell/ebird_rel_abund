@@ -76,20 +76,28 @@ fit_species_model <- function(polygon,
   }
 
   # ── Step 3: Extract covariates at checklist locations ────────────────────
-  message("\n── Step 3/4: Extracting covariates ──────────────────────────")
-  ebird_df <- extract_covariates(ebird_df, cov_stack)
-
+  # Skipped if load_ebird() used the sampling master fast path (covariates
+  # are already attached and drop_na was already applied).
   cov_cols <- grep(
     "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height)", names(ebird_df), value = TRUE
   )
-  n_before_drop <- nrow(ebird_df)
-  ebird_df      <- tidyr::drop_na(ebird_df, dplyr::all_of(cov_cols))
-  n_dropped     <- n_before_drop - nrow(ebird_df)
-  if (n_dropped > 0) {
-    message(sprintf(
-      "  Dropped %d checklists with missing covariate values (%d remaining).",
-      n_dropped, nrow(ebird_df)
-    ))
+  if (length(cov_cols) == 0L) {
+    message("\n── Step 3/4: Extracting covariates ──────────────────────────")
+    ebird_df <- extract_covariates(ebird_df, cov_stack)
+    cov_cols <- grep(
+      "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height)", names(ebird_df), value = TRUE
+    )
+    n_before_drop <- nrow(ebird_df)
+    ebird_df      <- tidyr::drop_na(ebird_df, dplyr::all_of(cov_cols))
+    n_dropped     <- n_before_drop - nrow(ebird_df)
+    if (n_dropped > 0) {
+      message(sprintf(
+        "  Dropped %d checklists with missing covariate values (%d remaining).",
+        n_dropped, nrow(ebird_df)
+      ))
+    }
+  } else {
+    message("\n── Step 3/4: Covariates from sampling master (skipping extraction).")
   }
 
   # ── Step 4: Spatiotemporal subsampling + GAM ──────────────────────────────
