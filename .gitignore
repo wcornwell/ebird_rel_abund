@@ -26,9 +26,8 @@ rez_plots/
 batch_nsw_log.csv
 
 # =============================================================================
-# Derived data files (regenerated from EBD)
+# Derived data files (large or regenerated from EBD)
 # =============================================================================
-nsw_species_list.csv
 nsw_ebird_taxonomy.csv
 nsw_species_rarity_cutoff.png
 

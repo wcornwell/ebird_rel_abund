@@ -29,10 +29,15 @@ ebird_rel_abund/
 ├── nsw_species_list.R       # Generate nsw_species_list.csv from raw EBD
 ├── rez_abundance.R          # Post-processing: per-REZ abundance stats + plots
 │
-├── test_tweedie_vs_nb.R     # CV comparison: Tweedie vs NB family
-├── test_log_transforms.R    # CV comparison: linear vs log-transformed predictors
-├── test_pop_density.R       # F-stat analysis of pop_density across 40 species
-├── test_count_filter.R      # Visual check of smooths/predictions for 4 species
+├── analysis/                # Exploratory and evaluation scripts
+│   ├── test_tweedie_vs_nb.R     # CV comparison: Tweedie vs NB family
+│   ├── test_log_transforms.R    # CV comparison: linear vs log-transformed predictors
+│   ├── test_pop_density.R       # F-stat analysis of pop_density across 40 species
+│   ├── test_count_filter.R      # Visual check of smooths/predictions for 4 species
+│   ├── test_nsw_buffer.R        # Integration test for multi-state buffered run
+│   ├── test_nsw.R               # Original single-state test (reference only)
+│   ├── 06_abundance.Rmd         # Cornell eBird Best Practices tutorial (reference)
+│   └── workflow_comparison.md   # Comparison of tutorial vs ebirdabund package
 │
 ├── ebirdabund_cache/        # Auto-generated cache (do not commit)
 │   ├── zerofilled_*.rds     # Per-species zero-filled checklists (~490 files)
