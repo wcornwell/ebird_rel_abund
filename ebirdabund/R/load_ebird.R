@@ -130,30 +130,40 @@ read_ebd_observations <- function(ebd_txt,
     stop("`ebd_txt` must be a non-empty character vector of file paths.")
   }
 
-  read_one <- function(p) {
-    p_resolved <- resolve_ebird_path(p)
-    validate_ebd_header(p_resolved)
-    message("  Scanning EBD: ", basename(p_resolved))
-    df <- as.data.frame(data.table::fread(
-      p_resolved,
-      select       = c(6L, 11L, 35L),
-      sep          = "\t",
-      quote        = "",
-      showProgress = TRUE,
-      na.strings   = ""
-    ))
-    names(df) <- c("common_name", "observation_count", "checklist_id")
-    if (!is.null(species_set)) {
-      df <- df[df[["common_name"]] %in% species_set, , drop = FALSE]
-    }
-    if (!is.null(valid_checklist_ids)) {
-      df <- df[df[["checklist_id"]] %in% valid_checklist_ids, , drop = FALSE]
-    }
-    df
+  paths <- vapply(ebd_txt, resolve_ebird_path, character(1))
+
+  # Validate headers cheaply (reads one line per file) before the big scan.
+  invisible(lapply(paths, validate_ebd_header))
+
+  if (length(paths) == 1L) {
+    message("  Scanning EBD: ", basename(paths))
+    cmd <- NULL
+    src <- paths
+  } else {
+    # Single-pass concatenation via awk: print header from file 1 only,
+    # then data rows from all files. Much faster than 5 separate freads.
+    message(sprintf("  Scanning %d EBD files in one pass...", length(paths)))
+    cmd <- paste("awk 'FNR>1 || NR==1'", paste(shQuote(paths), collapse = " "))
+    src <- NULL
   }
 
-  parts <- lapply(ebd_txt, read_one)
-  if (length(parts) == 1L) parts[[1L]] else do.call(rbind, parts)
+  df <- as.data.frame(data.table::fread(
+    if (is.null(cmd)) src else cmd,
+    select       = c(6L, 11L, 35L),
+    sep          = "\t",
+    quote        = "",
+    showProgress = TRUE,
+    na.strings   = ""
+  ))
+  names(df) <- c("common_name", "observation_count", "checklist_id")
+
+  if (!is.null(species_set)) {
+    df <- df[df[["common_name"]] %in% species_set, , drop = FALSE]
+  }
+  if (!is.null(valid_checklist_ids)) {
+    df <- df[df[["checklist_id"]] %in% valid_checklist_ids, , drop = FALSE]
+  }
+  df
 }
 
 # Single-species wrapper kept for backward compatibility with load_ebird()'s
