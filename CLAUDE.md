@@ -62,14 +62,22 @@ ebird_rel_abund/
 
 | File | Size | Purpose |
 |------|------|---------|
-| `ebirdabund/raw_data/.../ebd_AU-NSW_unv_smp_relFeb-2026.txt` | 6.1 GB | eBird observations (EBD) |
-| `ebirdabund/raw_data/.../ebd_AU-NSW_unv_smp_relFeb-2026_sampling.txt` | 316 MB | Complete checklists (sampling events) |
+| `ebirdabund/raw_data/ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026.txt` | 6.1 GB | NSW eBird observations (EBD) |
+| `ebirdabund/raw_data/ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026_sampling.txt` | 316 MB | NSW complete checklists |
+| `ebirdabund/raw_data/ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026.txt` | — | ACT eBird observations |
+| `ebirdabund/raw_data/ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026_sampling.txt` | — | ACT complete checklists |
+| `ebirdabund/raw_data/ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026.txt` | 6.9 GB | VIC eBird observations |
+| `ebirdabund/raw_data/ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026_sampling.txt` | — | VIC complete checklists |
+| `ebirdabund/raw_data/ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026.txt` | 7.1 GB | QLD eBird observations |
+| `ebirdabund/raw_data/ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026_sampling.txt` | — | QLD complete checklists |
+| `ebirdabund/raw_data/ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026.txt` | — | SA eBird observations |
+| `ebirdabund/raw_data/ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026_sampling.txt` | — | SA complete checklists |
 | `botw_species/BOTW_2025.gpkg` | 9.3 GB | BirdLife range polygons for masking |
 | `nsw_ebird_taxonomy.csv` | 23 KB | Common → scientific name lookup |
 | `nsw_species_list.csv` | 37 KB | Species to model (pre-filtered) |
 | `RenewableEnergyZones_Spatial/` | — | NSW REZ polygons for downstream analysis |
 
-The EBD is read with integer column indices (cols 6, 11, 35) not names — if you update to a different EBD version, verify these indices haven't shifted.
+The EBD is read with integer column indices (cols 6, 11, 35) not names — `validate_ebd_header()` checks these against the expected column names before any `fread` call. If you update to a different EBD release, run a test species first and watch for header-validation errors.
 
 ---
 
@@ -77,27 +85,36 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — if yo
 
 ```
 1. nsw_species_list.R
-   → reads sampling + EBD, computes reporting rates
+   → reads NSW sampling + EBD, computes reporting rates
    → writes nsw_species_list.csv  (run once per EBD update)
 
 2. run_batch_nsw.R  (main run)
-   a. PRE-CACHE: single EBD pass → zerofilled_{species}.rds per species
-      (prevents parallel workers competing for the 6 GB file)
-   b. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC once → cov_stack_v3_*.tif
-   c. BATCH: estimate_abundance_batch() — parallel GAM per species
+   a. POLYGON: NSW state boundary + 100 km buffer (GDA94/Albers, EPSG:3577)
+      — includes all of ACT and border regions of VIC/QLD/SA as training data
+   b. PRE-CACHE: reads all 5 state sampling files filtered to buffered bbox,
+      then scans all 5 EBD files → zerofilled_{species}.rds per species in
+      ebirdabund_cache_nsw_buffer/  (prevents parallel workers competing for files)
+   c. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC once →
+      cov_stack_v4_{bbox}.tif in ebirdabund_cache/ (bbox-keyed, shared)
+   d. BATCH: estimate_abundance_batch() — parallel GAM per species
       For each species:
         load_ebird() [uses cache] → extract_covariates() → subsample_hex()
         → fit_gam() → predict_abundance() [two resolutions] → save .tif + .png
-   d. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
-   e. LOG: append to batch_nsw_log.csv after each chunk
+        Map PNGs include NSW state border overlay for reference.
+   e. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
+   f. LOG: append to batch_nsw_log.csv after each chunk
 
 3. rez_abundance.R  (post-processing, run after batch)
-   → loads stack + REZ polygons + zerofilled cache
+   → loads stack + REZ polygons + zerofilled cache (ebirdabund_cache_nsw_buffer/)
    → per REZ: mean abundance, checklist frequency, mean count
    → writes top50_{rez}.png + abundance_{rez}.csv
 ```
 
-To re-run from scratch: delete `species_maps/`, `zerofilled_*.rds`, and `batch_nsw_log.csv`. Keep the covariate stack (`cov_stack_v3_*.tif`) and the static downloads (gadm, climate, elevation, etc.) — those don't change.
+**Two cache directories:**
+- `ebirdabund_cache/` — covariate tiles, GADM boundaries. Shared across runs; do not delete.
+- `ebirdabund_cache_nsw_buffer/` — per-species zerofilled `.rds` files, keyed to the NSW+buffer sampling pool. Delete and rebuild if the study polygon or EBD files change.
+
+To re-run from scratch: delete `species_maps/`, `ebirdabund_cache_nsw_buffer/`, and `batch_nsw_log.csv`. Keep `ebirdabund_cache/` — the covariate stack and static downloads don't change.
 
 ---
 
@@ -120,6 +137,8 @@ To re-run from scratch: delete `species_maps/`, `zerofilled_*.rds`, and `batch_n
 - `temp_annual` — k=6
 - `log1p(pop_density)` — k=4 (log1p: spans ~4 orders of magnitude)
 - `water_occ` — k=4
+- `clay` — k=4 (SoilGrids 0–5 cm clay fraction; NA at ocean/water set to 0)
+- `log1p(tree_height)` — k=4 (OzTreeMap 30 m canopy height median, Pucino et al. 2025; NA where no canopy set to 0)
 
 Effort covariates are log-transformed because they are right-skewed and the log scale distributes knots more evenly. The transformation happens inside the GAM formula string so raw column values flow through unchanged — the prediction surface (`duration_minutes = 60`, `effort_distance_km = 1`) is evaluated correctly.
 
@@ -150,8 +169,8 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 
 ### High priority
 - **X-count checklists**: Currently excluded in `clean_ebird()` *after* zero-fill. They should be excluded from the sampling pool *before* zero-fill so all species share the same checklist universe. Otherwise, a species' absence rate is computed against a slightly inflated denominator. Requires re-building the zerofilled cache.
-- **Config file**: `run_batch_nsw.R` has ~10 hard-coded paths at the top. Extract these into a `config.R` or YAML so the same batch script can be pointed at a different region without editing. Essential for geographic scaling.
-- **EBD column index brittleness**: Columns 6, 11, 35 are hard-coded in `load_ebird.R` and `run_batch_nsw.R`. Add a header-validation check that confirms `COMMON NAME`, `OBSERVATION COUNT`, and `SAMPLING EVENT IDENTIFIER` are at those positions before the full scan.
+- **Config file**: `run_batch_nsw.R` still has hard-coded paths at the top (EBD files, cache dirs, output dirs). Extracting these into a `config.R` or YAML would make it easier to point the same script at a different region.
+- **EBD column index brittleness**: ~~Columns 6, 11, 35 are hard-coded.~~ **Done** — `validate_ebd_header()` now checks column names at those positions before any `fread` call.
 
 ### Medium priority
 - **Generalise `nsw_species_list.R`**: It's NSW-specific (variable names, output file name, plot title). Wrapping it into a function `generate_species_list(region_name, ebd_path, samp_path, ...)` would make it reusable for geographic scaling.
@@ -169,7 +188,11 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 
 ## Geographic Scaling Plan
 
-The package (`ebirdabund/`) is already region-agnostic — `fit_species_model()` and `estimate_abundance_batch()` accept any `sf` polygon. The work needed to add a new region:
+The package (`ebirdabund/`) is region-agnostic — `fit_species_model()` and `estimate_abundance_batch()` accept any `sf` polygon and any number of EBD/sampling files as character vectors.
+
+**Current setup:** NSW + 100 km buffer as the study polygon, with EBD training data from NSW, ACT, VIC, QLD, and SA. The buffer captures ~397k checklists per species after hex subsampling (vs ~133k with NSW-only data).
+
+The work needed to add a new region:
 
 1. Download regional EBD + sampling files.
 2. Run `generate_species_list()` (once generalised) for the new region.
@@ -177,5 +200,6 @@ The package (`ebirdabund/`) is already region-agnostic — `fit_species_model()`
 4. Create a `run_batch_{region}.R` pointing at the new files — or, better, a single `run_batch.R` that reads a config file.
 5. The covariate downloads (ESA, WorldClim, etc.) are global and will re-use cached tiles if the bounding box overlaps.
 6. BOTW range masking is already global — no changes needed.
+7. Use a separate `ZEROFILL_CACHE` directory for each region's zerofilled data (the cache is keyed only by species name, not by polygon).
 
 The main bottleneck for larger regions will be RAM and disk: the zerofilled cache scales linearly with species count × checklist count.

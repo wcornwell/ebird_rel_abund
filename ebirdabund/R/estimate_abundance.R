@@ -45,12 +45,14 @@ fit_species_model <- function(polygon,
   if (!inherits(polygon, "sf") && !inherits(polygon, "sfc")) {
     stop("`polygon` must be an sf or sfc object.")
   }
-  if (!file.exists(ebird_zip) &&
-        !file.exists(tools::file_path_sans_ext(ebird_zip))) {
-    stop("eBird data file not found: ", ebird_zip)
+  missing_ebd <- ebird_zip[!file.exists(ebird_zip) &
+                             !file.exists(tools::file_path_sans_ext(ebird_zip))]
+  if (length(missing_ebd) > 0) {
+    stop("eBird data file(s) not found: ", paste(missing_ebd, collapse = ", "))
   }
-  if (!file.exists(sampling_txt)) {
-    stop("Sampling events file not found: ", sampling_txt)
+  missing_samp <- sampling_txt[!file.exists(sampling_txt)]
+  if (length(missing_samp) > 0) {
+    stop("Sampling events file(s) not found: ", paste(missing_samp, collapse = ", "))
   }
   if (!is.character(species) || nchar(trimws(species)) == 0) {
     stop("`species` must be a non-empty character string.")
@@ -78,7 +80,7 @@ fit_species_model <- function(polygon,
   ebird_df <- extract_covariates(ebird_df, cov_stack)
 
   cov_cols <- grep(
-    "^(lc_|elevation|precip_|temp_|pop_|water_)", names(ebird_df), value = TRUE
+    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height)", names(ebird_df), value = TRUE
   )
   n_before_drop <- nrow(ebird_df)
   ebird_df      <- tidyr::drop_na(ebird_df, dplyr::all_of(cov_cols))
@@ -166,7 +168,8 @@ predict_species_map <- function(model_fit,
                                 peak_time        = NULL,
                                 use_range        = TRUE,
                                 botw_path        = NULL,
-                                range_resolution = "9km") {
+                                range_resolution = "9km",
+                                border           = NULL) {
 
   gam_model <- model_fit$model
   cov_stack <- model_fit$cov_stack
@@ -229,7 +232,7 @@ predict_species_map <- function(model_fit,
 
   list(
     predictions = r_pred,
-    plot        = plot_abundance(r_pred, polygon, species)
+    plot        = plot_abundance(r_pred, polygon, species, border = border)
   )
 }
 

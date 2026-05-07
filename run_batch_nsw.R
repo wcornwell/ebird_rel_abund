@@ -6,14 +6,30 @@ suppressPackageStartupMessages({
   library(data.table)
 })
 
-EBD         <- "ebirdabund/raw_data/ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026.txt"
-SAMP        <- "ebirdabund/raw_data/ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026_sampling.txt"
-CACHE       <- "ebirdabund_cache"
+RAW_DATA <- "ebirdabund/raw_data"
+EBD <- c(
+  file.path(RAW_DATA, "ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026.txt"),
+  file.path(RAW_DATA, "ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026.txt"),
+  file.path(RAW_DATA, "ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026.txt"),
+  file.path(RAW_DATA, "ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026.txt"),
+  file.path(RAW_DATA, "ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026.txt")
+)
+SAMP <- c(
+  file.path(RAW_DATA, "ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026_sampling.txt"),
+  file.path(RAW_DATA, "ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026_sampling.txt"),
+  file.path(RAW_DATA, "ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026_sampling.txt"),
+  file.path(RAW_DATA, "ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026_sampling.txt"),
+  file.path(RAW_DATA, "ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026_sampling.txt")
+)
+CACHE          <- "ebirdabund_cache"          # covariate tiles, GADM — shared across runs
+ZEROFILL_CACHE <- "ebirdabund_cache_nsw_buffer"  # per-species zerofills — bbox-specific
 OUTPUT_DIR  <- "species_maps"
 LOG_FILE    <- "batch_nsw_log.csv"
 BOTW_PATH   <- "botw_species/BOTW_2025.gpkg"
 TAXONOMY    <- "nsw_ebird_taxonomy.csv"
 GRID_RES_KM <- c(3, 9)
+
+dir.create(ZEROFILL_CACHE, showWarnings = FALSE, recursive = TRUE)
 
 # ── Species list ──────────────────────────────────────────────────────────────
 # reporting_rate is already computed against effort-filtered complete checklists
@@ -23,11 +39,15 @@ species_df   <- species_df[species_df$reporting_rate >= 0.005, ]
 species_list <- species_df$common_name
 message(sprintf("Species to process: %d (reporting_rate >= 0.5%%)", length(species_list)))
 
-# ── NSW boundary (needed early for bbox in pre-cache block) ───────────────────
-message("Getting NSW boundary...")
-aus      <- geodata::gadm(country = "AUS", level = 1, path = CACHE)
-nsw      <- sf::st_as_sf(aus[aus$NAME_1 == "New South Wales", ])
-nsw_bbox <- as.numeric(sf::st_bbox(sf::st_transform(nsw, 4326)))
+# ── Study polygon: NSW + 100 km buffer ────────────────────────────────────────
+message("Getting NSW boundary (+ 100 km buffer for training data)...")
+aus        <- geodata::gadm(country = "AUS", level = 1, path = CACHE)
+nsw        <- sf::st_as_sf(aus[aus$NAME_1 == "New South Wales", ])
+polygon    <- sf::st_transform(
+  sf::st_buffer(sf::st_transform(nsw, 3577), 100000),  # GDA94/Albers, metres
+  4326
+)
+study_bbox <- as.numeric(sf::st_bbox(polygon))
 
 # ── Skip already-completed species ────────────────────────────────────────────
 safe_name_local <- function(x) gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
@@ -60,7 +80,7 @@ message(sprintf("Species already completed (skipping): %d",
 # ── Pre-cache: build missing zerofilled .rds files in one EBD pass ───────────
 # Prevents parallel workers competing to fread the large EBD simultaneously.
 cached      <- sub("^zerofilled_", "", sub("[.]rds$", "",
-               list.files(CACHE, pattern = "zerofilled_.*[.]rds")))
+               list.files(ZEROFILL_CACHE, pattern = "zerofilled_.*[.]rds")))
 needs_cache <- species_list[!safe_name_local(species_list) %in% cached]
 
 if (length(needs_cache) > 0) {
@@ -69,31 +89,22 @@ if (length(needs_cache) > 0) {
     length(needs_cache)
   ))
 
-  # Delegate to package functions so any changes to data-prep logic are picked
-  # up automatically. read_sampling() handles column selection, renaming, bbox
-  # filtering, and the complete-checklist filter; zero_fill() handles the merge.
-  sampling_df <- read_sampling(SAMP, nsw_bbox)
+  # read_sampling() accepts a vector of files; filters all to study_bbox and
+  # complete checklists in one pass. read_ebd_observations() similarly accepts
+  # a vector, validates each header, and concatenates results.
+  sampling_df <- read_sampling(SAMP, study_bbox)
+  valid_ids   <- sampling_df$checklist_id
 
-  message("  Reading EBD (full scan for uncached species)...")
-  ebd_all <- as.data.frame(fread(
-    EBD,
-    # Column indices verified against Feb-2026 EBD header:
-    #   col 6  = COMMON NAME
-    #   col 11 = OBSERVATION COUNT
-    #   col 35 = SAMPLING EVENT IDENTIFIER
-    select       = c(6L, 11L, 35L),
-    sep          = "\t",
-    quote        = "",
-    showProgress = TRUE,
-    na.strings   = ""
-  ))
-  names(ebd_all) <- c("common_name", "observation_count", "checklist_id")
-  ebd_all <- ebd_all[ebd_all[["common_name"]] %in% needs_cache, ]
+  message(sprintf("  Scanning %d EBD file(s) for %d uncached species...",
+                  length(EBD), length(needs_cache)))
+  ebd_all <- read_ebd_observations(EBD,
+                                   species_set         = needs_cache,
+                                   valid_checklist_ids = valid_ids)
 
   message(sprintf("  Building caches for %d species...", length(needs_cache)))
   for (i in seq_along(needs_cache)) {
     sp      <- needs_cache[i]
-    cache_f <- file.path(CACHE, sprintf("zerofilled_%s.rds", safe_name_local(sp)))
+    cache_f <- file.path(ZEROFILL_CACHE, sprintf("zerofilled_%s.rds", safe_name_local(sp)))
     if (file.exists(cache_f)) next
     ebd_sp <- ebd_all[ebd_all[["common_name"]] == sp,
                       c("checklist_id", "observation_count"), drop = FALSE]
@@ -107,7 +118,7 @@ if (length(needs_cache) > 0) {
 
 # ── Covariates (built once, shared across all workers) ────────────────────────
 message("Preparing covariates...")
-cov <- prepare_covariates(nsw, cache_dir = CACHE)
+cov <- prepare_covariates(polygon, cache_dir = CACHE)
 message("Covariate layers: ", paste(names(cov), collapse = ", "))
 
 # ── Taxonomy (common name -> scientific name for BOTW range lookup) ───────────
@@ -125,15 +136,16 @@ if (length(species_list) == 0) {
   t_start <- proc.time()[["elapsed"]]
 
   results <- estimate_abundance_batch(
-    polygon      = nsw,
+    polygon      = polygon,
     ebird_zip    = EBD,
     sampling_txt = SAMP,
     species_list = species_list,
     taxonomy     = taxonomy,
     cov_stack    = cov,
-    cache_dir    = CACHE,
+    cache_dir    = ZEROFILL_CACHE,
     grid_res_km  = GRID_RES_KM,
     botw_path    = BOTW_PATH,
+    border       = nsw,
     output_dir   = OUTPUT_DIR,
     log_file     = LOG_FILE
   )

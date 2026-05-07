@@ -294,6 +294,16 @@ extract_covariates <- function(df, cov_stack) {
   vals <- terra::extract(cov_stack, pts, method = "bilinear")
   vals <- vals[, -1, drop = FALSE]  # drop ID column
 
+  # OzTreeMap returns NA where there is no tree canopy (open grassland,
+  # cropland, urban, water). Treat as height = 0, not missing data.
+  if ("tree_height" %in% names(vals)) {
+    vals$tree_height[is.na(vals$tree_height)] <- 0
+  }
+  # SoilGrids clay returns NA at ocean/water. Treat as 0 (no soil).
+  if ("clay" %in% names(vals)) {
+    vals$clay[is.na(vals$clay)] <- 0
+  }
+
   dplyr::bind_cols(df, vals)
 }
 

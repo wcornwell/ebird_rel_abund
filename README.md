@@ -91,6 +91,8 @@ Zero-fill is performed via `load_ebird.R`, reading the raw EBD with `data.table:
 | Climate | Not included | `precip_annual` (WorldClim BIO12), `temp_annual` (WorldClim BIO1) |
 | Water | Not included | `water_occ`: JRC Global Surface Water occurrence 0–100 (Pekel et al. 2016, updated 2021), streamed at 30 m via VSICURL |
 | Human footprint | Not included | `pop_density`: log₁₀(persons km⁻² + 1), WorldPop 2020 |
+| Soil | Not included | `clay`: SoilGrids 250 m clay fraction 0–5 cm (ISRIC); NA at water set to 0 |
+| Canopy height | Not included | `tree_height`: OzTreeMap 30 m median canopy height (Pucino et al. 2025, CSIRO); NA where no canopy set to 0 |
 | Covariate selection | Manually chosen for Wood Thrush | Automated; columns with < 4 unique values dropped; `lc_shrubs` always excluded |
 | Raster package | `raster` | `terra` |
 

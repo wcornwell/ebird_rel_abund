@@ -8,7 +8,7 @@ suppressPackageStartupMessages({
 STACK_PATH <- "species_maps/nsw_abundance_stack_3km.tif"
 SE_PATH    <- "species_maps/nsw_abundance_se_stack_3km.tif"
 REZ_PATH   <- "RenewableEnergyZones_Spatial/RenewableEnergyZones.shp"
-CACHE_DIR  <- "ebirdabund_cache"
+CACHE_DIR  <- "ebirdabund_cache_nsw_buffer"
 OUT_DIR    <- "rez_plots"
 TOP_N      <- 50
 

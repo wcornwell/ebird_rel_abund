@@ -81,6 +81,7 @@ estimate_abundance_batch <- function(
     use_range        = TRUE,
     botw_path        = NULL,
     range_resolution = "27km",
+    border           = NULL,
     n_cores          = max(1L, parallel::detectCores() - 1L),
     output_dir       = NULL,
     log_file         = NULL) {
@@ -155,7 +156,8 @@ estimate_abundance_batch <- function(
         peak_time        = peak_time,
         use_range        = use_range,
         botw_path        = botw_path,
-        range_resolution = range_resolution
+        range_resolution = range_resolution,
+        border           = border
       )
 
       # After the first resolution, check whether the species has any meaningful
@@ -342,7 +344,7 @@ estimate_abundance_batch <- function(
     cl,
     c("polygon", "ebird_zip", "sampling_txt", "wrapped_cov",
       "cache_dir", "grid_res_km", "hex_spacing_km", "peak_time",
-      "use_range", "botw_path", "range_resolution", "output_dir",
+      "use_range", "botw_path", "range_resolution", "border", "output_dir",
       "sci_lookup", "run_species"),
     envir = environment()
   )

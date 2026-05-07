@@ -178,8 +178,10 @@ plot_gam_smooths <- function(mod, species) {
     )
 }
 
-# Simple ggplot abundance map
-plot_abundance <- function(r_pred, polygon, species) {
+# Simple ggplot abundance map.
+# border: optional sf polygon drawn as a distinct border line (e.g. NSW state
+#   boundary when polygon is a buffered study area).
+plot_abundance <- function(r_pred, polygon, species, border = NULL) {
   abd_df <- as.data.frame(r_pred[["abd"]], xy = TRUE, na.rm = TRUE)
   names(abd_df) <- c("x", "y", "abd")
 
@@ -188,14 +190,25 @@ plot_abundance <- function(r_pred, polygon, species) {
 
   poly_wgs84 <- sf::st_transform(polygon, 4326)
 
-  ggplot2::ggplot() +
+  p <- ggplot2::ggplot() +
     ggplot2::geom_sf(data = poly_wgs84, fill = "grey93", colour = NA) +
     ggplot2::geom_raster(
       data = abd_df,
       ggplot2::aes(x = .data$x, y = .data$y, fill = .data$abd)
     ) +
     ggplot2::geom_sf(data = poly_wgs84,
-                     fill = NA, colour = "grey40", linewidth = 0.4) +
+                     fill = NA, colour = "grey40", linewidth = 0.4)
+
+  if (!is.null(border)) {
+    p <- p + ggplot2::geom_sf(
+      data      = sf::st_transform(border, 4326),
+      fill      = NA,
+      colour    = "black",
+      linewidth = 0.7
+    )
+  }
+
+  p +
     ggplot2::scale_fill_gradient(
       low  = "grey90",
       high = "#3B0F70",

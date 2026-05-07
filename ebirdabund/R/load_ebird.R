@@ -216,7 +216,7 @@ load_ebird <- function(polygon, ebird_zip, sampling_txt, species, cache_dir) {
     message("Loading cached zero-filled data for '", species, "'.")
     zf <- readRDS(cache_f)
   } else {
-    ebd_txt  <- resolve_ebird_path(ebird_zip)
+    ebd_txt  <- vapply(ebird_zip, resolve_ebird_path, character(1))
     sampling <- read_sampling(sampling_txt, bb)
     ebd_spp  <- read_ebd_species(ebd_txt, species)
     zf       <- zero_fill(sampling, ebd_spp)
