@@ -187,8 +187,27 @@ estimate_abundance_batch <- function(
       }
     }
 
-    dev_expl <- tryCatch(summary(model_fit$model)$dev.expl, warning = function(w) NA_real_)
-    if (is.nan(dev_expl)) dev_expl <- NA_real_
+    dev_expl <- withCallingHandlers(
+      tryCatch(summary(model_fit$model)$dev.expl, error = function(e) NA_real_),
+      warning = function(w) invokeRestart("muffleWarning")
+    )
+    # For NB models, getTheta() returns log(theta). If mgcv uses the log-scale
+    # value directly in deviance residuals, fit$deviance is NaN. Recompute
+    # with exp(getTheta()) as the actual dispersion parameter.
+    if (is.null(dev_expl) || is.nan(dev_expl) || is.na(dev_expl)) {
+      dev_expl <- tryCatch({
+        mod   <- model_fit$model
+        theta <- exp(mod$family$getTheta())
+        y     <- mod$y
+        fv    <- mod$fitted.values
+        dr    <- ifelse(y == 0,
+          2 * theta * log(theta / (fv + theta)),
+          2 * (y * log(y / fv) + (y + theta) * log((fv + theta) / (y + theta)))
+        )
+        de <- 1 - sum(dr, na.rm = TRUE) / mod$null.deviance
+        if (is.nan(de) || is.na(de)) NA_real_ else de
+      }, error = function(e) NA_real_)
+    }
     list(n_checklists     = nrow(model_fit$data),
          n_positive       = sum(model_fit$data$observation_count > 0L),
          dev_expl         = dev_expl,

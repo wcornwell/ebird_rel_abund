@@ -28,7 +28,7 @@ LOG_FILE       <- "test_nsw_buffer_log.csv"
 BOTW_PATH      <- "botw_species/BOTW_2025.gpkg"
 TAXONOMY       <- "nsw_ebird_taxonomy.csv"
 GRID_RES_KM    <- c(3, 9)
-SPECIES_LIST   <- c("Gray Currawong", "Australian Logrunner")
+SPECIES_LIST   <- c("Masked Lapwing", "Crested Pigeon")
 
 dir.create(ZEROFILL_CACHE, showWarnings = FALSE, recursive = TRUE)
 dir.create(OUTPUT_DIR,     showWarnings = FALSE, recursive = TRUE)

@@ -219,17 +219,41 @@ predict_species_map <- function(model_fit,
       }
     }
 
-    if (!is.null(range_sf) && nrow(range_sf) > 0) {
-      # BirdLife polygons often have near-duplicate vertices that the S2
-      # spherical engine rejects. Disable S2 so GEOS handles the repair.
+    apply_range_mask <- function(r, range) {
       old_s2 <- sf::sf_use_s2()
       sf::sf_use_s2(FALSE)
-      range_sf <- sf::st_make_valid(sf::st_union(
-        sf::st_transform(range_sf, 4326)
-      ))
+      range_u <- sf::st_make_valid(sf::st_union(sf::st_transform(range, 4326)))
       sf::sf_use_s2(old_s2)
-      range_vect <- terra::vect(range_sf)
-      r_pred <- terra::mask(r_pred, range_vect)
+      terra::mask(r, terra::vect(range_u))
+    }
+
+    if (!is.null(range_sf) && nrow(range_sf) > 0) {
+      r_masked <- apply_range_mask(r_pred, range_sf)
+      masked_sum <- terra::global(r_masked[["abd"]], "sum", na.rm = TRUE)[[1L]]
+
+      if (is.na(masked_sum) || masked_sum <= 1e-5) {
+        # BOTW polygon exists but doesn't overlap the study region — likely a
+        # subspecies/taxonomy mismatch (e.g. Masked Lapwing northern range only).
+        # Fall back to ebirdst before accepting an all-NA mask.
+        warning("BOTW mask produced zero abundance for '", species,
+                "' — polygon may not cover study region. Trying ebirdst fallback.")
+        range_sf2 <- load_range_ebirdst(species, range_resolution)
+        if (!is.null(range_sf2) && nrow(range_sf2) > 0) {
+          r_masked2 <- apply_range_mask(r_pred, range_sf2)
+          masked_sum2 <- terra::global(r_masked2[["abd"]], "sum", na.rm = TRUE)[[1L]]
+          if (!is.na(masked_sum2) && masked_sum2 > 1e-5) {
+            message("  ebirdst fallback succeeded.")
+            r_pred <- r_masked2
+          } else {
+            warning("ebirdst fallback also produced zero abundance for '", species,
+                    "' — leaving unmasked.")
+          }
+        } else {
+          warning("No ebirdst range for '", species, "' — leaving unmasked.")
+        }
+      } else {
+        r_pred <- r_masked
+      }
     } else {
       warning("Could not load range for '", species,
               "'; abundance map is unmasked.")
