@@ -10,46 +10,66 @@ ref_protocol <- function(model) {
 # pred_surface : data.frame with longitude, latitude + covariate columns
 # polygon      : sf polygon (for masking output raster)
 # grid_res_km  : resolution used to build pred_surface (sets raster cell size)
-# peak_time    : optional numeric override (decimal hours); estimated if NULL
+# peak_doy     : integer DOY override; estimated from model if NULL
+# peak_time    : decimal-hour override; estimated from model if NULL
 #
-# Returns a terra::SpatRaster with two layers: abd and abd_se.
+# DOY and time are found via the Cornell eBird Best Practices approach: sweep
+# each variable over its range at mean habitat + standard effort, then take the
+# argmax of the lower 95% CI (fit - 1.96 * se). This reflects when the species
+# is most detectable according to the model, not when observers happen to go out.
+#
+# Returns a list: list(predictions = SpatRaster, peak_doy = int, peak_time = dbl)
 predict_abundance <- function(model, pred_surface, polygon,
-                              grid_res_km = 1, peak_time = NULL) {
-  train      <- model$model
-  proto      <- ref_protocol(model)
+                              grid_res_km = 1, peak_doy = NULL, peak_time = NULL) {
+  train <- model$model
+  proto <- ref_protocol(model)
 
-  # Use the circular mean DOY from detections so that species peaking
-  # around Dec-Jan (austral summer) are not mis-assigned to mid-winter.
-  # Simple median fails for records spanning the year boundary (DOY 340
-  # and DOY 15 have a linear median of ~178, but a circular mean of ~1).
-  detected <- train[train$observation_count > 0, ]
-  ref_rows <- if (nrow(detected) >= 10L) detected else train
-  doy_circ_mean <- function(doy) {
-    theta <- doy * 2 * pi / 365
-    C     <- mean(cos(theta), na.rm = TRUE)
-    S     <- mean(sin(theta), na.rm = TRUE)
-    raw   <- atan2(S, C) * 365 / (2 * pi)
-    round(((raw %% 365) + 365) %% 365)
-  }
-  median_doy <- doy_circ_mean(ref_rows$day_of_year)
-  if (median_doy == 0L) median_doy <- 365L
-  message(sprintf("Standard DOY: %d (circular mean of detections)", median_doy))
+  if (is.null(peak_doy) || is.null(peak_time)) {
+    # Build reference row from the prediction surface — it has raw column names
+    # (e.g. precip_annual, not log(precip_annual)) that predict.gam expects.
+    # The model frame (model$model) stores transformed names so cannot be used.
+    non_hab <- c("day_of_year", "time_observations_started", "duration_minutes",
+                 "effort_distance_km", "number_observers", "protocol_type",
+                 "longitude", "latitude")
+    hab_cols <- setdiff(names(pred_surface), non_hab)
 
-  if (is.null(peak_time)) {
-    time_circ_mean <- function(t) {
-      theta <- t * 2 * pi / 24
-      C <- mean(cos(theta), na.rm = TRUE)
-      S <- mean(sin(theta), na.rm = TRUE)
-      ((atan2(S, C) * 24 / (2 * pi)) %% 24 + 24) %% 24
+    ref_base <- as.data.frame(lapply(
+      pred_surface[, hab_cols, drop = FALSE],
+      function(x) if (is.numeric(x)) mean(x, na.rm = TRUE) else x[1L]
+    ))
+    ref_base$duration_minutes   <- 60
+    ref_base$effort_distance_km <- 1
+    ref_base$number_observers   <- 1L
+    ref_base$protocol_type      <- factor(proto, levels = levels(train$protocol_type))
+
+    lcl <- function(df) {
+      p <- mgcv::predict.gam(model, newdata = df, type = "link", se.fit = TRUE)
+      p$fit - 1.96 * p$se.fit
     }
-    peak_time <- time_circ_mean(ref_rows$time_observations_started)
-    message(sprintf("Peak observation time: %.2f (circular mean of detections)", peak_time))
+
+    if (is.null(peak_doy)) {
+      seq_doy        <- seq(1L, 365L, by = 1L)
+      doy_df         <- ref_base[rep(1L, length(seq_doy)), ]
+      doy_df$day_of_year               <- seq_doy
+      doy_df$time_observations_started <- 12   # hold time fixed while sweeping DOY
+      peak_doy <- seq_doy[which.max(lcl(doy_df))]
+      message(sprintf("Standard DOY: %d (model-based peak)", peak_doy))
+    }
+
+    if (is.null(peak_time)) {
+      seq_tod        <- seq(0, 24, length.out = 300)
+      tod_df         <- ref_base[rep(1L, length(seq_tod)), ]
+      tod_df$day_of_year               <- peak_doy
+      tod_df$time_observations_started <- seq_tod
+      peak_time <- seq_tod[which.max(lcl(tod_df))]
+      message(sprintf("Peak observation time: %.2f (model-based peak)", peak_time))
+    }
   }
 
   # Add standard-effort columns to full prediction surface
   pred_data <- pred_surface |>
     dplyr::mutate(
-      day_of_year               = median_doy,
+      day_of_year               = peak_doy,
       time_observations_started = peak_time,
       duration_minutes          = 60,
       effort_distance_km        = 1,
@@ -101,5 +121,9 @@ predict_abundance <- function(model, pred_surface, polygon,
   r_out        <- c(r_abd, r_se)
   names(r_out) <- c("abd", "abd_se")
 
-  terra::mask(r_out, poly_vect)
+  list(
+    predictions = terra::mask(r_out, poly_vect),
+    peak_doy    = peak_doy,
+    peak_time   = peak_time
+  )
 }

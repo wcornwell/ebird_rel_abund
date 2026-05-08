@@ -57,7 +57,12 @@ ebird_rel_abund/
 │
 ├── nsw_species_list.csv     # 556 species, reporting_rate >= 0.5%
 ├── nsw_ebird_taxonomy.csv   # common_name → scientific_name for BOTW lookup
-├── batch_nsw_log.csv        # Per-species run log (ok/excluded/failed)
+├── batch_nsw_log.csv        # Per-species run log — columns: common_name,
+│                            #   scientific_name, status, exclusion_reason,
+│                            #   run_date, n_checklists, n_positive, dev_expl,
+│                            #   model_sum, peak_doy, peak_time, max_obs_count,
+│                            #   max_modeled_abd, range_source, spatial_cv,
+│                            #   error_message
 └── botw_species/BOTW_2025.gpkg  # BirdLife range polygons (9.3 GB, not committed)
 ```
 
@@ -99,15 +104,20 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
    b. PRE-CACHE: reads all 5 state sampling files filtered to buffered bbox,
       then scans all 5 EBD files → zerofilled_{species}.rds per species in
       ebirdabund_cache_nsw_buffer/  (prevents parallel workers competing for files)
-   c. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC once →
+   c. EBIRDST RANGES: for each species in the ebirdst 2023 catalogue, downloads
+      range .gpkg files (smooth + raw, 27 km + 9 km) to the local ebirdst data
+      directory (~11 s/species, ~48 min first run). Skips already-downloaded
+      species, so subsequent runs complete instantly. Requires EBIRDST_KEY env var
+      (set automatically in the script from the stored key).
+   d. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC once →
       cov_stack_v4_{bbox}.tif in ebirdabund_cache/ (bbox-keyed, shared)
-   d. BATCH: estimate_abundance_batch() — parallel GAM per species
+   e. BATCH: estimate_abundance_batch() — parallel GAM per species
       For each species:
         load_ebird() [uses cache] → extract_covariates() → subsample_hex()
         → fit_gam() → predict_abundance() [two resolutions] → save .tif + .png
         Map PNGs include NSW state border overlay for reference.
-   e. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
-   f. LOG: append to batch_nsw_log.csv after each chunk
+   f. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
+   g. LOG: append to batch_nsw_log.csv after each chunk
 
 3. rez_abundance.R  (post-processing, run after batch)
    → loads stack + REZ polygons + zerofilled cache (ebirdabund_cache_nsw_buffer/)
@@ -153,7 +163,7 @@ Effort covariates are log-transformed because they are right-skewed and the log 
 
 **Exclusion criteria**: fewer than 50 positive checklists after hex subsampling, or model sum ≤ 1e-5 across the polygon.
 
-**Range masking**: BOTW 2025 preferred; falls back to `ebirdst::load_ranges()` if no BOTW match.
+**Range masking**: ebirdst 2023 preferred; falls back to BOTW 2025 if the species is not in the ebirdst catalogue or if the ebirdst mask produces zero abundance over the study region. ~266 of 479 modelled NSW species are in the ebirdst 2023 catalogue. Ranges are pre-downloaded by `run_batch_nsw.R` before the batch (download step is skipped for species already cached locally). The `range_source` column in `batch_nsw_log.csv` records which source was used per species.
 
 ---
 
@@ -180,7 +190,7 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 ### Medium priority
 - **Generalise `nsw_species_list.R`**: It's NSW-specific (variable names, output file name, plot title). Wrapping it into a function `generate_species_list(region_name, ebd_path, samp_path, ...)` would make it reusable for geographic scaling.
 - **Taxonomy file**: `nsw_ebird_taxonomy.csv` is derived from the NSW EBD. For other regions, this needs to be generated from the regional EBD or replaced with the full eBird taxonomy (available from eBird as `eBird_taxonomy_v*.csv`).
-- **Covariate cache versioning**: The cache key uses `v3` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
+- **Covariate cache versioning**: The cache key uses `v4` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
 - **REZ script parameterisation**: `rez_abundance.R` paths and the `TOP_N = 50` cutoff are hard-coded. Making it accept command-line arguments would make it easier to run for new regions or different analysis polygons.
 - **Parallel memory**: `n_cores = detectCores() - 1` doesn't account for terra's per-worker memory usage. For larger regions (more grid cells, higher resolution), this may OOM. Consider a `max_ram_gb` guard that caps workers.
 
@@ -204,7 +214,7 @@ The work needed to add a new region:
 3. Generate a taxonomy CSV for the region (or use the full eBird taxonomy).
 4. Create a `run_batch_{region}.R` pointing at the new files — or, better, a single `run_batch.R` that reads a config file.
 5. The covariate downloads (ESA, WorldClim, etc.) are global and will re-use cached tiles if the bounding box overlaps.
-6. BOTW range masking is already global — no changes needed.
+6. Range masking is already global: BOTW covers all species, and ebirdst covers whichever species it models. Run the ebirdst pre-download step for the new species list before the batch — the download key (`EBIRDST_KEY`) is already set in `run_batch_nsw.R`.
 7. Use a separate `ZEROFILL_CACHE` directory for each region's zerofilled data (the cache is keyed only by species name, not by polygon).
 
 The main bottleneck for larger regions will be RAM and disk: the zerofilled cache scales linearly with species count × checklist count.

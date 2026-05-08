@@ -144,23 +144,6 @@ estimate_abundance_batch <- function(
     }
 
     # ── Per-species stats from training data ─────────────────────────────────
-    detected  <- model_fit$data[model_fit$data$observation_count > 0L, ]
-    ref_rows  <- if (nrow(detected) >= 10L) detected else model_fit$data
-
-    circ_mean_doy <- function(doy) {
-      theta <- doy * 2 * pi / 365
-      raw   <- atan2(mean(sin(theta), na.rm = TRUE),
-                     mean(cos(theta), na.rm = TRUE)) * 365 / (2 * pi)
-      as.integer(round(((raw %% 365) + 365) %% 365))
-    }
-    circ_mean_time <- function(t) {
-      theta <- t * 2 * pi / 24
-      ((atan2(mean(sin(theta), na.rm = TRUE),
-              mean(cos(theta), na.rm = TRUE)) * 24 / (2 * pi)) %% 24 + 24) %% 24
-    }
-
-    peak_doy_obs  <- circ_mean_doy(ref_rows$day_of_year)
-    peak_time_obs <- round(circ_mean_time(ref_rows$time_observations_started), 2)
     max_obs_count <- max(model_fit$data$observation_count, na.rm = TRUE)
 
     model_sum        <- NA_real_
@@ -168,6 +151,9 @@ estimate_abundance_batch <- function(
     spatial_cv       <- NA_real_
     range_source_out <- NA_character_
     excluded         <- FALSE
+    cached_range_vect <- NULL
+    cached_peak_doy   <- NULL   # computed by first resolution, reused by rest
+    cached_peak_time  <- NULL
 
     for (res_km in grid_res_km) {
       pred <- predict_species_map(
@@ -176,12 +162,20 @@ estimate_abundance_batch <- function(
         species          = sp,
         sci_name         = sci_lookup[[sp]],
         grid_res_km      = res_km,
-        peak_time        = peak_time,
+        peak_doy         = cached_peak_doy,
+        peak_time        = cached_peak_time,
         use_range        = use_range,
         botw_path        = botw_path,
         range_resolution = range_resolution,
-        border           = border
+        border           = border,
+        range_vect       = cached_range_vect
       )
+      if (is.null(cached_range_vect) && !is.null(pred$range_vect))
+        cached_range_vect <- pred$range_vect
+      if (is.null(cached_peak_doy)) {
+        cached_peak_doy  <- pred$peak_doy
+        cached_peak_time <- pred$peak_time
+      }
 
       # After the first resolution, capture raster-based stats and check
       # whether predicted abundance is meaningful.
@@ -234,8 +228,8 @@ estimate_abundance_batch <- function(
          n_positive       = sum(model_fit$data$observation_count > 0L),
          dev_expl         = dev_expl,
          model_sum        = model_sum,
-         peak_doy         = peak_doy_obs,
-         peak_time        = peak_time_obs,
+         peak_doy         = cached_peak_doy,
+         peak_time        = cached_peak_time,
          max_obs_count    = max_obs_count,
          max_modeled_abd  = max_modeled_abd,
          range_source     = range_source_out,
@@ -423,12 +417,42 @@ estimate_abundance_batch <- function(
                   ceiling(seq_along(remaining_spp) / workers))
 
   for (chunk in chunks) {
-    chunk_res <- parallel::parLapplyLB(
-      cl,
-      chunk,
-      function(sp) {
-        cov <- if (!is.null(wrapped_cov)) terra::unwrap(wrapped_cov) else NULL
-        tryCatch(run_species(sp, cov), error = function(e) e)
+    chunk_res <- tryCatch(
+      parallel::parLapplyLB(
+        cl,
+        chunk,
+        function(sp) {
+          cov <- if (!is.null(wrapped_cov)) terra::unwrap(wrapped_cov) else NULL
+          tryCatch(run_species(sp, cov), error = function(e) e)
+        }
+      ),
+      error = function(e) {
+        # Worker process died (e.g. SIGPIPE, OOM, GDAL segfault). Rebuild the
+        # cluster so subsequent chunks can continue, and treat every species in
+        # this chunk as failed.
+        message(sprintf(
+          "  [CLUSTER ERROR] chunk failed (%s). Rebuilding cluster and marking %d species as failed.",
+          conditionMessage(e), length(chunk)
+        ))
+        tryCatch(parallel::stopCluster(cl), error = function(e2) invisible(NULL))
+        cl <<- parallel::makeCluster(workers)
+        parallel::clusterExport(cl, "pkg_src", envir = environment())
+        parallel::clusterEvalQ(cl, {
+          if (requireNamespace("ebirdabund", quietly = TRUE)) {
+            library(ebirdabund)
+          } else if (dir.exists(pkg_src)) {
+            devtools::load_all(pkg_src, quiet = TRUE)
+          }
+        })
+        parallel::clusterExport(
+          cl,
+          c("polygon", "ebird_zip", "sampling_txt", "wrapped_cov",
+            "cache_dir", "grid_res_km", "hex_spacing_km", "peak_time",
+            "use_range", "botw_path", "range_resolution", "border", "output_dir",
+            "sci_lookup", "run_species"),
+          envir = parent.env(environment())
+        )
+        lapply(chunk, function(sp) simpleError(conditionMessage(e)))
       }
     )
     for (i in seq_along(chunk)) {

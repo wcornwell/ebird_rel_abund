@@ -64,8 +64,15 @@ if (file.exists(LOG_FILE)) {
   write.csv(prior_log, LOG_FILE, row.names = FALSE)
 }
 
-done_tif <- sub("[.]tif$", "",
-                list.files(file.path(OUTPUT_DIR, "3km"), pattern = "[.]tif$"))
+# Only count a species as done-via-TIF if ALL requested resolutions exist.
+done_tif <- Reduce(
+  intersect,
+  lapply(GRID_RES_KM, function(res_km) {
+    sub("[.]tif$", "",
+        list.files(file.path(OUTPUT_DIR, paste0(res_km, "km")),
+                   pattern = "[.]tif$"))
+  })
+)
 done_log <- character(0)
 if (file.exists(LOG_FILE)) {
   prior_log <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
@@ -77,6 +84,39 @@ already_done <- union(done_tif, done_log)
 species_list <- species_list[!safe_name_local(species_list) %in% already_done]
 message(sprintf("Species already completed (skipping): %d",
                 length(species_df$common_name) - length(species_list)))
+
+# Write stub "ok" log entries for species completed via TIF but absent from the
+# log (e.g. from a run that crashed before logging, or a previous log loss).
+tif_not_logged <- setdiff(done_tif, done_log)
+if (length(tif_not_logged) > 0) {
+  stub_names <- species_df$common_name[
+    safe_name_local(species_df$common_name) %in% tif_not_logged]
+  taxonomy_map <- setNames(
+    read.csv(TAXONOMY, stringsAsFactors = FALSE)$scientific_name,
+    read.csv(TAXONOMY, stringsAsFactors = FALSE)$common_name
+  )
+  stubs <- do.call(rbind, lapply(stub_names, function(sp) {
+    data.frame(
+      common_name = sp, scientific_name = unname(taxonomy_map[sp]),
+      status = "ok", exclusion_reason = NA_character_,
+      run_date = format(Sys.Date(), "%Y-%m-%d"),
+      n_checklists = NA_integer_, n_positive = NA_integer_,
+      dev_expl = NA_real_, model_sum = NA_real_,
+      peak_doy = NA_integer_, peak_time = NA_real_,
+      max_obs_count = NA_integer_, max_modeled_abd = NA_real_,
+      range_source = NA_character_, spatial_cv = NA_real_,
+      error_message = NA_character_, stringsAsFactors = FALSE
+    )
+  }))
+  if (!file.exists(LOG_FILE)) {
+    write.csv(stubs, LOG_FILE, row.names = FALSE)
+  } else {
+    write.table(stubs, LOG_FILE, sep = ",", col.names = FALSE,
+                row.names = FALSE, append = TRUE, quote = TRUE)
+  }
+  message(sprintf("  Wrote %d stub log entries for TIF-complete species.",
+                  nrow(stubs)))
+}
 
 # ── Pre-cache: build missing zerofilled .rds files in one EBD pass ───────────
 # Prevents parallel workers competing to fread the large EBD simultaneously.
@@ -128,6 +168,56 @@ prepare_sampling_master(SAMP, polygon, cov, ZEROFILL_CACHE)
 # ── Taxonomy (common name -> scientific name for BOTW range lookup) ───────────
 taxonomy <- read.csv(TAXONOMY, stringsAsFactors = FALSE)
 message(sprintf("Taxonomy loaded: %d species", nrow(taxonomy)))
+
+# ── Pre-download ebirdst range data ──────────────────────────────────────────
+# Downloads range polygons for species in the ebirdst 2023 catalogue so that
+# load_range_ebirdst() finds local files instead of silently returning NULL.
+message("\n── Pre-downloading ebirdst range data ───────────────────────────────")
+if (nchar(Sys.getenv("EBIRDST_KEY")) == 0L)
+  Sys.setenv(EBIRDST_KEY = "uu3kqjdl17se")
+
+sp_codes_all <- vapply(species_list, function(sp) {
+  tryCatch(ebirdst::get_species(sp), error = function(e) NA_character_)
+}, character(1L))
+
+in_catalogue <- !is.na(sp_codes_all) &
+  sp_codes_all %in% ebirdst::ebirdst_runs$species_code
+
+ebirdst_dir   <- ebirdst::ebirdst_data_dir()
+sp_codes_cat  <- sp_codes_all[in_catalogue]
+sp_names_cat  <- names(sp_codes_cat)
+
+has_ranges <- vapply(sp_codes_cat, function(code) {
+  rd <- file.path(ebirdst_dir, "2023", code, "ranges")
+  dir.exists(rd) && length(list.files(rd, pattern = "\\.gpkg$|\\.shp$")) > 0L
+}, logical(1L))
+
+to_dl       <- sp_codes_cat[!has_ranges]
+to_dl_names <- sp_names_cat[!has_ranges]
+
+message(sprintf(
+  "  In ebirdst catalogue: %d / %d  |  already downloaded: %d  |  to download: %d",
+  sum(in_catalogue), length(species_list), sum(has_ranges), length(to_dl)
+))
+
+for (i in seq_along(to_dl)) {
+  tryCatch(
+    suppressMessages(ebirdst::ebirdst_download_status(
+      to_dl[i],
+      download_abundance = FALSE,
+      download_ranges    = TRUE,
+      show_progress      = FALSE,
+      force              = FALSE
+    )),
+    error = function(e) {
+      warning(sprintf("ebirdst download failed for '%s' (%s): %s",
+                      to_dl_names[i], to_dl[i], conditionMessage(e)))
+    }
+  )
+  if (i %% 25L == 0L || i == length(to_dl))
+    message(sprintf("  Downloaded %d / %d", i, length(to_dl)))
+}
+message("  ebirdst range pre-download complete.\n")
 
 # ── Batch run ─────────────────────────────────────────────────────────────────
 message(sprintf("\nStarting batch of %d species...", length(species_list)))

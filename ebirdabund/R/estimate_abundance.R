@@ -173,11 +173,13 @@ predict_species_map <- function(model_fit,
                                 species,
                                 sci_name         = NULL,
                                 grid_res_km      = 1,
+                                peak_doy         = NULL,
                                 peak_time        = NULL,
                                 use_range        = TRUE,
                                 botw_path        = NULL,
                                 range_resolution = "9km",
-                                border           = NULL) {
+                                border           = NULL,
+                                range_vect       = NULL) {
 
   gam_model <- model_fit$model
   cov_stack <- model_fit$cov_stack
@@ -189,9 +191,12 @@ predict_species_map <- function(model_fit,
   pred_surface <- extract_covariates(pred_surface, cov_stack)
   pred_surface <- tidyr::drop_na(pred_surface, dplyr::all_of(cov_cols))
 
-  r_pred <- predict_abundance(
-    gam_model, pred_surface, polygon, grid_res_km, peak_time
+  abd_result <- predict_abundance(
+    gam_model, pred_surface, polygon, grid_res_km, peak_doy, peak_time
   )
+  r_pred    <- abd_result$predictions
+  peak_doy  <- abd_result$peak_doy
+  peak_time <- abd_result$peak_time
 
   # ── Step 2: Mask to species range ────────────────────────────────────────
   range_source <- "unmasked"
@@ -199,46 +204,60 @@ predict_species_map <- function(model_fit,
   if (use_range) {
     message("\n── Step 2/2: Masking to species range ───────────────────────")
 
-    apply_range_mask <- function(r, range) {
-      old_s2 <- sf::sf_use_s2()
-      sf::sf_use_s2(FALSE)
-      range_u <- sf::st_make_valid(sf::st_union(sf::st_transform(range, 4326)))
-      sf::sf_use_s2(old_s2)
-      terra::mask(r, terra::vect(range_u))
-    }
-
-    try_mask <- function(r, range_sf, source_label) {
-      if (is.null(range_sf) || nrow(range_sf) == 0L) return(NULL)
-      r_m <- apply_range_mask(r, range_sf)
-      s   <- terra::global(r_m[["abd"]], "sum", na.rm = TRUE)[[1L]]
-      if (is.na(s) || s <= 1e-5) {
-        warning(source_label, " range for '", species,
-                "' does not overlap study region — trying next source.")
-        return(NULL)
-      }
-      message(sprintf("  %s: %d polygon(s) applied.", source_label, nrow(range_sf)))
-      r_m
-    }
-
-    r_masked <- NULL
-
-    # 1. Try ebirdst first: observation-grounded, more reliable for distribution
-    range_ebirdst <- load_range_ebirdst(species, range_resolution)
-    r_masked <- try_mask(r_pred, range_ebirdst, "ebirdst")
-    if (!is.null(r_masked)) range_source <- "ebirdst"
-
-    # 2. Fall back to BOTW: authoritative taxonomy but can miss regional populations
-    if (is.null(r_masked) && !is.null(botw_path) &&
-        !is.null(sci_name) && !is.na(sci_name)) {
-      range_botw <- load_range_botw(sci_name, botw_path)
-      r_masked <- try_mask(r_pred, range_botw, "BOTW")
-      if (!is.null(r_masked)) range_source <- "BOTW"
-    }
-
-    if (!is.null(r_masked)) {
-      r_pred <- r_masked
+    # If a pre-built range vector was supplied (e.g. reused across resolutions),
+    # use it directly to avoid re-reading BOTW and re-running st_union.
+    if (!is.null(range_vect)) {
+      r_pred       <- terra::mask(r_pred, range_vect)
+      src          <- attr(range_vect, "range_source")
+      range_source <- if (!is.null(src)) src else "cached"
+      message(sprintf("  %s: cached range applied.", range_source))
     } else {
-      warning("No usable range found for '", species, "' — map is unmasked.")
+
+      union_range <- function(range) {
+        old_s2 <- sf::sf_use_s2()
+        sf::sf_use_s2(FALSE)
+        u <- sf::st_make_valid(sf::st_union(sf::st_transform(range, 4326)))
+        sf::sf_use_s2(old_s2)
+        terra::vect(u)
+      }
+
+      try_mask <- function(r, range_sf, source_label) {
+        if (is.null(range_sf) || nrow(range_sf) == 0L) return(NULL)
+        rv  <- union_range(range_sf)
+        r_m <- terra::mask(r, rv)
+        s   <- terra::global(r_m[["abd"]], "sum", na.rm = TRUE)[[1L]]
+        if (is.na(s) || s <= 1e-5) {
+          warning(source_label, " range for '", species,
+                  "' does not overlap study region — trying next source.")
+          return(NULL)
+        }
+        message(sprintf("  %s: %d polygon(s) applied.", source_label, nrow(range_sf)))
+        list(raster = r_m, vect = rv)
+      }
+
+      mask_result  <- NULL
+
+      # 1. Try ebirdst first
+      range_ebirdst <- load_range_ebirdst(species, range_resolution)
+      mask_result   <- try_mask(r_pred, range_ebirdst, "ebirdst")
+      if (!is.null(mask_result)) range_source <- "ebirdst"
+
+      # 2. Fall back to BOTW
+      if (is.null(mask_result) && !is.null(botw_path) &&
+          !is.null(sci_name) && !is.na(sci_name)) {
+        range_botw  <- load_range_botw(sci_name, botw_path)
+        mask_result <- try_mask(r_pred, range_botw, "BOTW")
+        if (!is.null(mask_result)) range_source <- "BOTW"
+      }
+
+      if (!is.null(mask_result)) {
+        r_pred     <- mask_result$raster
+        range_vect <- mask_result$vect
+        attr(range_vect, "range_source") <- range_source
+      } else {
+        warning("No usable range found for '", species, "' — map is unmasked.")
+        range_vect <- NULL
+      }
     }
   }
 
@@ -247,7 +266,10 @@ predict_species_map <- function(model_fit,
   list(
     predictions  = r_pred,
     plot         = plot_abundance(r_pred, polygon, species, border = border),
-    range_source = range_source
+    range_source = range_source,
+    range_vect   = range_vect,
+    peak_doy     = peak_doy,
+    peak_time    = peak_time
   )
 }
 
@@ -333,6 +355,7 @@ estimate_abundance <- function(polygon,
                                cache_dir        = "ebirdabund_cache",
                                grid_res_km      = 1,
                                hex_spacing_km   = 5,
+                               peak_doy         = NULL,
                                peak_time        = NULL,
                                use_range        = TRUE,
                                botw_path        = NULL,
@@ -354,6 +377,7 @@ estimate_abundance <- function(polygon,
     species          = species,
     sci_name         = sci_name,
     grid_res_km      = grid_res_km,
+    peak_doy         = peak_doy,
     peak_time        = peak_time,
     use_range        = use_range,
     botw_path        = botw_path,

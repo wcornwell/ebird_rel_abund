@@ -49,7 +49,7 @@ load_clay <- function(bb, ext, template) {
 # mosaicking so terra::mosaic() sees consistent resolutions.
 # variant: "median" (highest accuracy) or "best_pick" (vegetation-class-specific).
 load_oztreemap <- function(bb, ext, template, cache_dir, variant = "median",
-                           chunk_deg = 4) {
+                           chunk_deg = 3) {
   cache_file <- file.path(cache_dir, sprintf(
     "oztreemap_%s_%.2f_%.2f_%.2f_%.2f.tif", variant, bb[1], bb[2], bb[3], bb[4]
   ))
@@ -81,10 +81,12 @@ load_oztreemap <- function(bb, ext, template, cache_dir, variant = "median",
     message(sprintf("  Downloading OzTreeMap %s via WCS (%d chunks)...",
                     variant, n_chunks))
 
-    # WCS server rejects requests wider than ~480 pixels per side, so we cannot
-    # add a meaningful overlap buffer without exceeding the limit for interior
-    # chunks.  Seam artefacts at 1 km / k=4 GAM scale are negligible.
-    overlap <- 0
+    # WCS server rejects requests wider than ~480 pixels per side.
+    # chunk_deg=3 → 360 px/side, leaving ~120 px of headroom for overlap.
+    # overlap=0.083° ≈ 10 px each side → 380 px total, well within limit.
+    # Edge pixels from independent WCS renders land in the discarded buffer,
+    # preventing seam artefacts in the mosaicked output.
+    overlap <- 10 * res  # 10 output pixels ≈ 0.083° at 1/120° resolution
 
     tiles <- list()
     for (i in seq_len(length(lon_breaks) - 1L)) {
@@ -299,9 +301,11 @@ extract_covariates <- function(df, cov_stack) {
   if ("tree_height" %in% names(vals)) {
     vals$tree_height[is.na(vals$tree_height)] <- 0
   }
-  # SoilGrids clay returns NA at ocean/water. Treat as 0 (no soil).
+  # SoilGrids clay returns NA at ocean/water. Fill with median of non-NA
+  # values so water cells don't pull predictions toward 0.
   if ("clay" %in% names(vals)) {
-    vals$clay[is.na(vals$clay)] <- 0
+    clay_med <- median(vals$clay, na.rm = TRUE)
+    vals$clay[is.na(vals$clay)] <- clay_med
   }
 
   dplyr::bind_cols(df, vals)
