@@ -55,7 +55,8 @@ safe_name_local <- function(x) gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
 # ── Migrate log to current schema if it exists ────────────────────────────────
 LOG_COLS <- c("common_name", "scientific_name", "status", "exclusion_reason",
               "run_date", "n_checklists", "n_positive", "dev_expl",
-              "model_sum", "error_message")
+              "model_sum", "peak_doy", "peak_time", "max_obs_count",
+              "max_modeled_abd", "range_source", "spatial_cv", "error_message")
 if (file.exists(LOG_FILE)) {
   prior_log <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
   for (col in setdiff(LOG_COLS, names(prior_log))) prior_log[[col]] <- NA

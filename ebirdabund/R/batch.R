@@ -143,8 +143,31 @@ estimate_abundance_batch <- function(
       }
     }
 
-    model_sum <- NA_real_
-    excluded  <- FALSE
+    # ── Per-species stats from training data ─────────────────────────────────
+    detected  <- model_fit$data[model_fit$data$observation_count > 0L, ]
+    ref_rows  <- if (nrow(detected) >= 10L) detected else model_fit$data
+
+    circ_mean_doy <- function(doy) {
+      theta <- doy * 2 * pi / 365
+      raw   <- atan2(mean(sin(theta), na.rm = TRUE),
+                     mean(cos(theta), na.rm = TRUE)) * 365 / (2 * pi)
+      as.integer(round(((raw %% 365) + 365) %% 365))
+    }
+    circ_mean_time <- function(t) {
+      theta <- t * 2 * pi / 24
+      ((atan2(mean(sin(theta), na.rm = TRUE),
+              mean(cos(theta), na.rm = TRUE)) * 24 / (2 * pi)) %% 24 + 24) %% 24
+    }
+
+    peak_doy_obs  <- circ_mean_doy(ref_rows$day_of_year)
+    peak_time_obs <- round(circ_mean_time(ref_rows$time_observations_started), 2)
+    max_obs_count <- max(model_fit$data$observation_count, na.rm = TRUE)
+
+    model_sum        <- NA_real_
+    max_modeled_abd  <- NA_real_
+    spatial_cv       <- NA_real_
+    range_source_out <- NA_character_
+    excluded         <- FALSE
 
     for (res_km in grid_res_km) {
       pred <- predict_species_map(
@@ -160,13 +183,16 @@ estimate_abundance_batch <- function(
         border           = border
       )
 
-      # After the first resolution, check whether the species has any meaningful
-      # predicted abundance in the polygon.  predict_abundance already masks to
-      # the polygon, so a plain global sum is sufficient.
+      # After the first resolution, capture raster-based stats and check
+      # whether predicted abundance is meaningful.
       if (res_km == grid_res_km[1L]) {
-        model_sum <- as.numeric(
-          terra::global(pred$predictions[["abd"]], "sum", na.rm = TRUE)[[1L]]
-        )
+        abd_vals        <- terra::values(pred$predictions[["abd"]], na.rm = TRUE)
+        model_sum       <- sum(abd_vals)
+        max_modeled_abd <- if (length(abd_vals) > 0L) max(abd_vals) else NA_real_
+        spatial_cv      <- if (length(abd_vals) > 1L && mean(abd_vals) > 0)
+          round(sd(abd_vals) / mean(abd_vals), 4) else NA_real_
+        range_source_out <- pred$range_source
+
         if (is.na(model_sum) || model_sum <= 1e-5) {
           excluded <- TRUE
           message(sprintf(
@@ -191,27 +217,29 @@ estimate_abundance_batch <- function(
       tryCatch(summary(model_fit$model)$dev.expl, error = function(e) NA_real_),
       warning = function(w) invokeRestart("muffleWarning")
     )
-    # For NB models, getTheta() returns log(theta). If mgcv uses the log-scale
-    # value directly in deviance residuals, fit$deviance is NaN. Recompute
-    # with exp(getTheta()) as the actual dispersion parameter.
     if (is.null(dev_expl) || is.nan(dev_expl) || is.na(dev_expl)) {
       dev_expl <- tryCatch({
         mod   <- model_fit$model
         theta <- exp(mod$family$getTheta())
         y     <- mod$y
         fv    <- mod$fitted.values
-        dr    <- ifelse(y == 0,
-          2 * theta * log(theta / (fv + theta)),
-          2 * (y * log(y / fv) + (y + theta) * log((fv + theta) / (y + theta)))
-        )
+        dr    <- 2 * (ifelse(y > 0, y * log(y / fv), 0) -
+                      (y + theta) * log((y + theta) / (fv + theta)))
         de <- 1 - sum(dr, na.rm = TRUE) / mod$null.deviance
         if (is.nan(de) || is.na(de)) NA_real_ else de
       }, error = function(e) NA_real_)
     }
+
     list(n_checklists     = nrow(model_fit$data),
          n_positive       = sum(model_fit$data$observation_count > 0L),
          dev_expl         = dev_expl,
          model_sum        = model_sum,
+         peak_doy         = peak_doy_obs,
+         peak_time        = peak_time_obs,
+         max_obs_count    = max_obs_count,
+         max_modeled_abd  = max_modeled_abd,
+         range_source     = range_source_out,
+         spatial_cv       = spatial_cv,
          excluded         = excluded,
          exclusion_reason = if (excluded) "negligible_abundance" else NA_character_)
   }
@@ -225,34 +253,46 @@ estimate_abundance_batch <- function(
 
   # Format one result as a single-row data.frame for the log.
   make_log_row <- function(sp, res) {
+    base <- data.frame(
+      common_name      = sp,
+      scientific_name  = unname(sci_lookup[sp]),
+      run_date         = format(Sys.Date(), "%Y-%m-%d"),
+      stringsAsFactors = FALSE
+    )
     if (inherits(res, "error")) {
-      data.frame(
-        common_name      = sp,
-        scientific_name  = unname(sci_lookup[sp]),
+      cbind(base, data.frame(
         status           = "failed",
         exclusion_reason = NA_character_,
-        run_date         = format(Sys.Date(), "%Y-%m-%d"),
         n_checklists     = NA_integer_,
         n_positive       = NA_integer_,
         dev_expl         = NA_real_,
         model_sum        = NA_real_,
+        peak_doy         = NA_integer_,
+        peak_time        = NA_real_,
+        max_obs_count    = NA_integer_,
+        max_modeled_abd  = NA_real_,
+        range_source     = NA_character_,
+        spatial_cv       = NA_real_,
         error_message    = conditionMessage(res),
         stringsAsFactors = FALSE
-      )
+      ))
     } else {
-      data.frame(
-        common_name      = sp,
-        scientific_name  = unname(sci_lookup[sp]),
+      cbind(base, data.frame(
         status           = if (isTRUE(res$excluded)) "excluded" else "ok",
         exclusion_reason = res$exclusion_reason,
-        run_date         = format(Sys.Date(), "%Y-%m-%d"),
         n_checklists     = res$n_checklists,
         n_positive       = res$n_positive,
         dev_expl         = res$dev_expl,
         model_sum        = res$model_sum,
+        peak_doy         = res$peak_doy,
+        peak_time        = res$peak_time,
+        max_obs_count    = res$max_obs_count,
+        max_modeled_abd  = res$max_modeled_abd,
+        range_source     = res$range_source,
+        spatial_cv       = res$spatial_cv,
         error_message    = NA_character_,
         stringsAsFactors = FALSE
-      )
+      ))
     }
   }
 
@@ -278,7 +318,13 @@ estimate_abundance_batch <- function(
              n_checklists     = e$n_checklists,
              n_positive       = e$n_positive,
              dev_expl         = NA_real_,
-             model_sum        = NA_real_)
+             model_sum        = NA_real_,
+             peak_doy         = NA_integer_,
+             peak_time        = NA_real_,
+             max_obs_count    = NA_integer_,
+             max_modeled_abd  = NA_real_,
+             range_source     = NA_character_,
+             spatial_cv       = NA_real_)
       },
       error = function(e) {
         message(sprintf("  [FAILED] %s: %s", species, conditionMessage(e)))

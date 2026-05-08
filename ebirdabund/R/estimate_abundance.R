@@ -194,30 +194,10 @@ predict_species_map <- function(model_fit,
   )
 
   # ── Step 2: Mask to species range ────────────────────────────────────────
+  range_source <- "unmasked"
+
   if (use_range) {
     message("\n── Step 2/2: Masking to species range ───────────────────────")
-
-    range_sf <- NULL
-
-    # Prefer BOTW if a path and scientific name are supplied
-    if (!is.null(botw_path) && !is.null(sci_name) && !is.na(sci_name)) {
-      range_sf <- load_range_botw(sci_name, botw_path)
-      if (!is.null(range_sf)) {
-        message(sprintf("  BOTW: %d polygon(s) loaded for '%s'.",
-                        nrow(range_sf), sci_name))
-      } else {
-        warning("BOTW: no range found for '", sci_name,
-                "'; falling back to ebirdst.")
-      }
-    }
-
-    # Fall back to ebirdst if BOTW not available or not found
-    if (is.null(range_sf)) {
-      range_sf <- load_range_ebirdst(species, range_resolution)
-      if (!is.null(range_sf) && nrow(range_sf) > 0) {
-        message(sprintf("  ebirdst: %d season polygon(s) loaded.", nrow(range_sf)))
-      }
-    }
 
     apply_range_mask <- function(r, range) {
       old_s2 <- sf::sf_use_s2()
@@ -227,44 +207,47 @@ predict_species_map <- function(model_fit,
       terra::mask(r, terra::vect(range_u))
     }
 
-    if (!is.null(range_sf) && nrow(range_sf) > 0) {
-      r_masked <- apply_range_mask(r_pred, range_sf)
-      masked_sum <- terra::global(r_masked[["abd"]], "sum", na.rm = TRUE)[[1L]]
-
-      if (is.na(masked_sum) || masked_sum <= 1e-5) {
-        # BOTW polygon exists but doesn't overlap the study region — likely a
-        # subspecies/taxonomy mismatch (e.g. Masked Lapwing northern range only).
-        # Fall back to ebirdst before accepting an all-NA mask.
-        warning("BOTW mask produced zero abundance for '", species,
-                "' — polygon may not cover study region. Trying ebirdst fallback.")
-        range_sf2 <- load_range_ebirdst(species, range_resolution)
-        if (!is.null(range_sf2) && nrow(range_sf2) > 0) {
-          r_masked2 <- apply_range_mask(r_pred, range_sf2)
-          masked_sum2 <- terra::global(r_masked2[["abd"]], "sum", na.rm = TRUE)[[1L]]
-          if (!is.na(masked_sum2) && masked_sum2 > 1e-5) {
-            message("  ebirdst fallback succeeded.")
-            r_pred <- r_masked2
-          } else {
-            warning("ebirdst fallback also produced zero abundance for '", species,
-                    "' — leaving unmasked.")
-          }
-        } else {
-          warning("No ebirdst range for '", species, "' — leaving unmasked.")
-        }
-      } else {
-        r_pred <- r_masked
+    try_mask <- function(r, range_sf, source_label) {
+      if (is.null(range_sf) || nrow(range_sf) == 0L) return(NULL)
+      r_m <- apply_range_mask(r, range_sf)
+      s   <- terra::global(r_m[["abd"]], "sum", na.rm = TRUE)[[1L]]
+      if (is.na(s) || s <= 1e-5) {
+        warning(source_label, " range for '", species,
+                "' does not overlap study region — trying next source.")
+        return(NULL)
       }
+      message(sprintf("  %s: %d polygon(s) applied.", source_label, nrow(range_sf)))
+      r_m
+    }
+
+    r_masked <- NULL
+
+    # 1. Try ebirdst first: observation-grounded, more reliable for distribution
+    range_ebirdst <- load_range_ebirdst(species, range_resolution)
+    r_masked <- try_mask(r_pred, range_ebirdst, "ebirdst")
+    if (!is.null(r_masked)) range_source <- "ebirdst"
+
+    # 2. Fall back to BOTW: authoritative taxonomy but can miss regional populations
+    if (is.null(r_masked) && !is.null(botw_path) &&
+        !is.null(sci_name) && !is.na(sci_name)) {
+      range_botw <- load_range_botw(sci_name, botw_path)
+      r_masked <- try_mask(r_pred, range_botw, "BOTW")
+      if (!is.null(r_masked)) range_source <- "BOTW"
+    }
+
+    if (!is.null(r_masked)) {
+      r_pred <- r_masked
     } else {
-      warning("Could not load range for '", species,
-              "'; abundance map is unmasked.")
+      warning("No usable range found for '", species, "' — map is unmasked.")
     }
   }
 
   message("\nDone.")
 
   list(
-    predictions = r_pred,
-    plot        = plot_abundance(r_pred, polygon, species, border = border)
+    predictions  = r_pred,
+    plot         = plot_abundance(r_pred, polygon, species, border = border),
+    range_source = range_source
   )
 }
 
