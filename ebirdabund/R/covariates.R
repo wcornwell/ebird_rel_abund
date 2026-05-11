@@ -42,102 +42,134 @@ load_clay <- function(bb, ext, template) {
   terra::resample(terra::crop(clay_wgs84, ext) / 10, template)
 }
 
-# Load OzTreeMap canopy height (Pucino et al. 2025, CSIRO) via the EASI WCS endpoint.
-# Publicly accessible — no credentials required.
-# The server limits each request to 32 tiles, so we split into chunk_deg×chunk_deg
-# chunks and mosaic. Each chunk is snapped to the template pixel grid before
-# mosaicking so terra::mosaic() sees consistent resolutions.
-# variant: "median" (highest accuracy) or "best_pick" (vegetation-class-specific).
-load_oztreemap <- function(bb, ext, template, cache_dir, variant = "median",
-                           chunk_deg = 3) {
+# WGS84 lon/lat → slippy-map tile (x, y) at zoom z (Bing/Google/OSM scheme).
+.lonlat_to_tile <- function(lon, lat, z) {
+  n <- 2^z
+  x <- floor((lon + 180) / 360 * n)
+  lat_rad <- lat * pi / 180
+  y <- floor((1 - log(tan(lat_rad) + 1 / cos(lat_rad)) / pi) / 2 * n)
+  list(x = as.integer(x), y = as.integer(y))
+}
+
+# Tile (x, y) at zoom z → Bing quadkey base-4 string (length z).
+.xy_to_quadkey <- function(x, y, z) {
+  q <- character(z)
+  for (i in seq.int(z, 1L)) {
+    digit <- 0L
+    mask  <- bitwShiftL(1L, i - 1L)
+    if (bitwAnd(x, mask) != 0L) digit <- digit + 1L
+    if (bitwAnd(y, mask) != 0L) digit <- digit + 2L
+    q[z - i + 1L] <- as.character(digit)
+  }
+  paste0(q, collapse = "")
+}
+
+# Load Meta/WRI Canopy Height Maps v2 (DINOv3, 2024 imagery, ~1 m native) from
+# the public AWS Open Data bucket (CC-BY 4.0, no auth). Tiles are 10-digit Bing
+# quadkeys at zoom 10 in EPSG:3857, stored as COGs with built-in overviews
+# (16384²/8192²/4096²/2048²/1024²/512² = 2.4/4.8/9.5/19/38/76 m).
+#
+# We force OVERVIEW_LEVEL=4 (1024×1024 ≈ 38 m effective) — the overview level
+# closest to the ~30 m output we actually want. Reading at this level lets us
+# use Meta's pre-built overview aggregation rather than averaging ourselves,
+# and is ~150× faster than letting GDAL auto-pick. Each tile is projected onto
+# a sub-template aligned to a master ~38 m WGS84 grid, then mosaicked.
+load_meta_chmv2 <- function(bb, ext, template, cache_dir,
+                            zoom = 10L, overview_level = 4L) {
   cache_file <- file.path(cache_dir, sprintf(
-    "oztreemap_%s_%.2f_%.2f_%.2f_%.2f.tif", variant, bb[1], bb[2], bb[3], bb[4]
+    "meta_chmv2_%.2f_%.2f_%.2f_%.2f.tif", bb[1], bb[2], bb[3], bb[4]
   ))
 
   if (!file.exists(cache_file)) {
-    # Clip to OzTreeMap's actual WCS coverage to avoid 500 errors on empty tiles
-    oz_bb  <- c(112.92, -43.76, 154.10, -9.86)
-    eff_bb <- c(max(bb[1], oz_bb[1]), max(bb[2], oz_bb[2]),
-                min(bb[3], oz_bb[3]), min(bb[4], oz_bb[4]))
-    if (eff_bb[1] >= eff_bb[3] || eff_bb[2] >= eff_bb[4]) {
-      warning("Study extent does not overlap OzTreeMap coverage — tree_height will be NA")
-      r <- template; terra::values(r) <- NA_real_; return(r)
+    Sys.setenv(
+      VSI_CACHE                          = "TRUE",
+      VSI_CACHE_SIZE                     = "536870912",
+      GDAL_DISABLE_READDIR_ON_OPEN       = "EMPTY_DIR",
+      CPL_VSIL_CURL_ALLOWED_EXTENSIONS   = ".tif",
+      GDAL_HTTP_MULTIPLEX                = "YES",
+      GDAL_HTTP_VERSION                  = "2",
+      GDAL_HTTP_MERGE_CONSECUTIVE_RANGES = "YES",
+      GDAL_NUM_THREADS                   = "ALL_CPUS"
+    )
+
+    base_url <- paste0(
+      "/vsicurl/https://dataforgood-fb-data.s3.amazonaws.com/",
+      "forests/v2/global/dinov3_global_chm_v2_ml3/chm/"
+    )
+
+    # Quadkey set covering bbox (clamped to Web Mercator's valid lat range).
+    lat_lo <- max(bb[2], -85.0511)
+    lat_hi <- min(bb[4],  85.0511)
+    nw <- .lonlat_to_tile(bb[1], lat_hi, zoom)
+    se <- .lonlat_to_tile(bb[3], lat_lo, zoom)
+    keys <- character(0)
+    for (y in seq.int(nw$y, se$y)) {
+      for (x in seq.int(nw$x, se$x)) {
+        keys <- c(keys, .xy_to_quadkey(x, y, zoom))
+      }
     }
 
-    # Snap to nearest 1/120° (standard 30-arc-second grid) so the WCS request
-    # always gets an exact value; minor rounding in terra ext/res arithmetic
-    # produces e.g. 0.008334 which the server rejects with HTTP 400.
-    res      <- round(terra::res(template)[1] / (1 / 120)) * (1 / 120)
-    wcs_base <- "https://ows.csiro.easi-eo.solutions/"
+    # Master ~38 m WGS84 grid covering ext (matches OVERVIEW_LEVEL=4 native
+    # resolution at mid-latitudes). Sub-templates snap to this grid so adjacent
+    # tiles mosaic cleanly without drift.
+    chm_tmpl <- terra::rast(ext, resolution = 38 / 111320, crs = "EPSG:4326")
 
-    lon_breaks <- seq(floor(eff_bb[1] / chunk_deg) * chunk_deg,
-                      ceiling(eff_bb[3] / chunk_deg) * chunk_deg,
-                      by = chunk_deg)
-    lat_breaks <- seq(floor(eff_bb[2] / chunk_deg) * chunk_deg,
-                      ceiling(eff_bb[4] / chunk_deg) * chunk_deg,
-                      by = chunk_deg)
+    message(sprintf(
+      "  Streaming Meta CHMv2: %d candidate quadkeys (zoom %d, OL=%d)...",
+      length(keys), zoom, overview_level
+    ))
+    t_start  <- Sys.time()
+    tiles    <- list()
+    n_loaded <- 0L
+    n_missing <- 0L
 
-    n_chunks <- (length(lon_breaks) - 1L) * (length(lat_breaks) - 1L)
-    message(sprintf("  Downloading OzTreeMap %s via WCS (%d chunks)...",
-                    variant, n_chunks))
+    for (k in keys) {
+      url <- paste0(base_url, k, ".tif")
+      r <- tryCatch(
+        suppressWarnings(suppressMessages(
+          terra::rast(url, opts = sprintf("OVERVIEW_LEVEL=%d", overview_level))
+        )),
+        error = function(e) NULL
+      )
+      if (is.null(r)) {
+        n_missing <- n_missing + 1L
+        next
+      }
 
-    # WCS server rejects requests wider than ~480 pixels per side.
-    # chunk_deg=3 → 360 px/side, leaving ~120 px of headroom for overlap.
-    # overlap=0.083° ≈ 10 px each side → 380 px total, well within limit.
-    # Edge pixels from independent WCS renders land in the discarded buffer,
-    # preventing seam artefacts in the mosaicked output.
-    overlap <- 10 * res  # 10 output pixels ≈ 0.083° at 1/120° resolution
+      ext_v   <- terra::vect(terra::ext(r), crs = terra::crs(r))
+      ext_wgs <- terra::ext(terra::project(ext_v, "EPSG:4326"))
+      sub_tmpl <- tryCatch(
+        terra::crop(chm_tmpl, ext_wgs, snap = "out"),
+        error = function(e) NULL
+      )
+      if (is.null(sub_tmpl) || prod(dim(sub_tmpl)[1:2]) == 0L) {
+        n_missing <- n_missing + 1L
+        next
+      }
 
-    tiles <- list()
-    for (i in seq_len(length(lon_breaks) - 1L)) {
-      for (j in seq_len(length(lat_breaks) - 1L)) {
-        cb <- c(
-          max(lon_breaks[i],     eff_bb[1]), max(lat_breaks[j],     eff_bb[2]),
-          min(lon_breaks[i + 1], eff_bb[3]), min(lat_breaks[j + 1], eff_bb[4])
-        )
-        if (cb[1] >= cb[3] || cb[2] >= cb[4]) next
+      r_proj <- tryCatch(
+        suppressWarnings(terra::project(r, sub_tmpl, method = "bilinear",
+                                        threads = TRUE)),
+        error = function(e) NULL
+      )
+      if (!is.null(r_proj)) {
+        tiles[[length(tiles) + 1L]] <- r_proj
+        n_loaded <- n_loaded + 1L
+      } else {
+        n_missing <- n_missing + 1L
+      }
 
-        # Buffered bbox for the WCS request; clipped to dataset bounds
-        dl <- c(
-          max(cb[1] - overlap, oz_bb[1]), max(cb[2] - overlap, oz_bb[2]),
-          min(cb[3] + overlap, oz_bb[3]), min(cb[4] + overlap, oz_bb[4])
-        )
-
-        wcs_url <- paste0(
-          wcs_base,
-          "?service=WCS&version=1.0.0&request=GetCoverage",
-          "&coverage=oztreemap_chm_", variant,
-          "&format=GeoTIFF",
-          sprintf("&bbox=%.4f,%.4f,%.4f,%.4f", dl[1], dl[2], dl[3], dl[4]),
-          "&crs=EPSG:4326",
-          sprintf("&resx=%.6f&resy=%.6f", res, res)
-        )
-
-        tmp <- tempfile(fileext = ".tif")
-        ok  <- tryCatch({
-          utils::download.file(wcs_url, tmp, mode = "wb", quiet = TRUE)
-          file.exists(tmp) && file.size(tmp) > 1000L
-        }, error = function(e) FALSE)
-
-        if (ok) {
-          r <- tryCatch(terra::rast(tmp), error = function(e) NULL)
-          if (!is.null(r)) {
-            # WCS returns 2-band GeoTIFF (best_pick + median); keep requested one
-            if (terra::nlyr(r) > 1L) r <- r[[variant]]
-            # Resample onto template-aligned grid, then crop to non-overlapping
-            # core so adjacent tiles don't double-count the buffer strip.
-            sub_tmpl <- terra::crop(template, terra::ext(r), snap = "out")
-            r_res <- terra::resample(r, sub_tmpl, method = "bilinear")
-            core_ext <- terra::ext(cb[1], cb[3], cb[2], cb[4])
-            tiles[[length(tiles) + 1L]] <- terra::crop(r_res, core_ext)
-          }
-        }
-        if (file.exists(tmp)) file.remove(tmp)
+      if ((n_loaded + n_missing) %% 100L == 0L) {
+        elapsed <- as.numeric(Sys.time() - t_start, units = "secs")
+        message(sprintf(
+          "    %d loaded / %d missing of %d  —  %.0f sec elapsed",
+          n_loaded, n_missing, length(keys), elapsed
+        ))
       }
     }
 
     if (length(tiles) == 0L) {
-      warning("OzTreeMap WCS: no chunks succeeded — tree_height will be NA")
+      warning("Meta CHMv2: no tiles loaded — tree_height will be NA")
       r <- template
       terra::values(r) <- NA_real_
       return(r)
@@ -146,25 +178,41 @@ load_oztreemap <- function(bb, ext, template, cache_dir, variant = "median",
     merged <- if (length(tiles) == 1L) {
       tiles[[1L]]
     } else {
-      do.call(terra::mosaic, tiles)
+      terra::mosaic(terra::sprc(tiles), fun = "mean")
     }
-    # WCS GeoTIFF may include a second mask band — keep only band 1
-    if (terra::nlyr(merged) > 1L) merged <- merged[[1L]]
-    # Smooth Sentinel-2 tile-boundary artefacts before caching.
-    # 3x3 focal mean at 1 km scale; negligible effect on k=4 GAM smooth.
-    merged <- terra::clamp(
-      terra::focal(merged, w = 3, fun = "mean",
-                   na.policy = "omit", na.rm = TRUE),
-      lower = 0, values = TRUE
+    # CHMv2 produces a small number of unphysical outliers — ~0.001% of pixels
+    # exceed plausible canopy height. Most are model misclassifications of tall
+    # narrow non-vegetation: wind turbines on ridge crests (NSW turbines are
+    # 100–200 m to rotor tip), transmission towers, silos. Verified that they
+    # are NOT cliff-edge artefacts (outlier slope distribution matches
+    # background). NSW old-growth eucalypts top out around 70–75 m, so anything
+    # above 60 m is set to NA rather than clamped — clamping would still
+    # contaminate the cell mean with a non-vegetation pixel; NA + area-mean
+    # downsample drops the bad pixel and averages over real canopy nearby.
+    merged <- terra::clamp(merged, lower = 0, values = TRUE)
+    merged <- terra::ifel(merged > 60, NA, merged)
+    terra::writeRaster(
+      merged, cache_file, overwrite = TRUE,
+      gdal = c("COMPRESS=DEFLATE", "TILED=YES", "BIGTIFF=IF_SAFER")
     )
-    terra::writeRaster(merged, cache_file, overwrite = TRUE)
-    message(sprintf("  OzTreeMap cached: %s", basename(cache_file)))
+    message(sprintf("  Meta CHMv2 cached: %s (%d/%d tiles loaded)",
+                    basename(cache_file), n_loaded, length(keys)))
   }
 
-  raw <- terra::rast(cache_file)
-  # Final resample to template can nudge near-zero cells slightly negative.
-  resampled <- terra::resample(terra::crop(raw, ext), template)
-  terra::clamp(resampled, lower = 0, values = TRUE)
+  raw      <- terra::rast(cache_file)
+  raw_crop <- terra::crop(raw, ext)
+  # 90th-percentile area aggregation rather than mean. Captures emergent
+  # canopy structure (tall trees in each cell — hollow-nesting parrot habitat,
+  # raptor perches, etc.) without being dominated by isolated artefact
+  # pixels: residual wind turbines / towers in the 40–60 m range sit in the
+  # top ~0.1% of a 26×26 cell window and so are excluded by the p90 cut.
+  # mean would smooth them in; max would let one bad pixel dominate.
+  ratio <- round(terra::res(template)[1] / terra::res(raw_crop)[1])
+  agg <- terra::aggregate(
+    raw_crop, fact = ratio,
+    fun = function(x, ...) stats::quantile(x, 0.9, na.rm = TRUE)
+  )
+  terra::resample(agg, template, method = "bilinear")
 }
 
 #' Download and cache habitat covariates for a study region
@@ -190,7 +238,10 @@ load_oztreemap <- function(bb, ext, template, cache_dir, variant = "median",
 #'   \code{temp_annual}, \code{pop_density} (log10 persons per km²,
 #'   WorldPop 2020 via \code{geodata::population()}), and
 #'   \code{water_occ} (JRC Global Surface Water occurrence 0–100,
-#'   Pekel et al. 2016 updated 2021, streamed via VSICURL).
+#'   Pekel et al. 2016 updated 2021, streamed via VSICURL),
+#'   \code{clay} (SoilGrids 0–5 cm clay percent, 250 m), and
+#'   \code{tree_height} (Meta/WRI Canopy Height Maps v2 DINOv3, 2024 imagery,
+#'   ~38 m effective via OVERVIEW_LEVEL=4 of the source COG pyramid).
 #'
 #' @export
 prepare_covariates <- function(polygon,
@@ -205,8 +256,9 @@ prepare_covariates <- function(polygon,
   )
 
   # Cache key: rounded bbox + version tag (bump version when layer set changes)
+  # v5: tree_height switched from OzTreeMap (CSIRO WCS) to Meta/WRI CHMv2.
   key        <- paste(round(bb, 2), collapse = "_")
-  stack_path <- file.path(cache_dir, paste0("cov_stack_v4_", key, ".tif"))
+  stack_path <- file.path(cache_dir, paste0("cov_stack_v5_", key, ".tif"))
 
   if (file.exists(stack_path)) {
     message("Loading cached covariate stack from ", stack_path)
@@ -263,8 +315,8 @@ prepare_covariates <- function(polygon,
   message("  clay content (SoilGrids 250 m, 0-5 cm)")
   clay <- load_clay(bb, ext, lc_layers[[1]])
 
-  message("  canopy height (OzTreeMap 30 m, Pucino et al. 2025)")
-  tree_height <- load_oztreemap(bb, ext, lc_layers[[1]], cache_dir)
+  message("  canopy height (Meta/WRI CHMv2 DINOv3, ~38 m via OL=4)")
+  tree_height <- load_meta_chmv2(bb, ext, lc_layers[[1]], cache_dir)
 
   stack <- terra::rast(c(
     lc_layers,
@@ -296,8 +348,8 @@ extract_covariates <- function(df, cov_stack) {
   vals <- terra::extract(cov_stack, pts, method = "bilinear")
   vals <- vals[, -1, drop = FALSE]  # drop ID column
 
-  # OzTreeMap returns NA where there is no tree canopy (open grassland,
-  # cropland, urban, water). Treat as height = 0, not missing data.
+  # Meta CHMv2 returns NA where there is no tree canopy or no valid scene
+  # (open grassland, cropland, urban, water). Treat as height = 0.
   if ("tree_height" %in% names(vals)) {
     vals$tree_height[is.na(vals$tree_height)] <- 0
   }

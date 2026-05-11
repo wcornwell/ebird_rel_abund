@@ -153,7 +153,7 @@ To re-run from scratch: delete `species_maps/`, `ebirdabund_cache_nsw_buffer/`, 
 - `log1p(pop_density)` — k=4 (log1p: spans ~4 orders of magnitude)
 - `water_occ` — k=4
 - `clay` — k=4 (SoilGrids 0–5 cm clay fraction; NA at ocean/water set to 0)
-- `log1p(tree_height)` — k=4 (OzTreeMap 30 m canopy height median, Pucino et al. 2025; NA where no canopy set to 0)
+- `log1p(tree_height)` — k=4 (Meta/WRI Canopy Height Maps v2 — DINOv3, 2024 imagery; native ~1 m, streamed via VSICURL from `s3://dataforgood-fb-data/forests/v2/global/dinov3_global_chm_v2_ml3/chm/` at OVERVIEW_LEVEL=4 ≈ 38 m, the closest pre-built overview to our ~30 m cache target. Pixels >60 m are set to NA (model misclassifies tall narrow non-vegetation — wind turbines on ridge crests, transmission towers, silos — as canopy). The cache is then **p90-aggregated** to the master ~1 km template: each output cell takes the 90th percentile of its source pixels, capturing emergent canopy structure (tall trees as hollow/perch habitat) while excluding residual artefacts that sit in the top ~0.1%. NA values at extraction set to 0. Replaces the earlier OzTreeMap layer, which had WCS grid artefacts.)
 
 Effort covariates are log-transformed because they are right-skewed and the log scale distributes knots more evenly. The transformation happens inside the GAM formula string so raw column values flow through unchanged — the prediction surface (`duration_minutes = 60`, `effort_distance_km = 1`) is evaluated correctly.
 
