@@ -255,6 +255,7 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 - **EBD column index brittleness**: ~~Columns 6, 11, 35 are hard-coded.~~ **Done** — `validate_ebd_header()` now checks column names at those positions before any `fread` call.
 
 ### Medium priority
+- **Non-species taxa**: The species list includes 4 non-species entries (e.g., "Accipitrine hawk sp. (former Accipiter sp.)", "miner sp.", "cuckoo sp."). These are either (a) unidentified subspecies/hybrids that can't be modeled meaningfully, or (b) eBird's legacy aggregated taxa. Recommendation: filter these out in `nsw_species_list.R` by checking for " sp. " in the common_name and excluding them before modeling. These contribute < 0.1 % reporting rate each so the impact is minimal, but cleanliness matters for scaling to other regions where aggregates may be more common.
 - **CHMv2 stripe artefacts**: The Meta/WRI CHMv2 raster has visible near-vertical stripes inherited from Sentinel-2 orbit/swath boundaries (different image counts, sun angles, and seasonality between adjacent orbital tracks bake discontinuities into DINOv3's height estimate). Visible in `tree_height_chmv2.png`. Same issue is reported in Moudrý et al. 2024 (Ecosphere) for Lang 2023 and Tolan 2024. Three fix paths, in order of effort:
     - **(C, easiest, ~10 LOC)** Two-stage aggregation in `load_meta_chmv2` (covariates.R): 38 m → ~250 m **mean** → 1 km **p90**. Current single-step p90 over a 26×26 window preferentially picks the lit side of stripes; an intermediate mean smooths within-stripe before the p90 captures emergent canopy. Also try anisotropic pre-smoothing (`terra::focal()` 1×5 along the stripe direction) and `OVERVIEW_LEVEL=5` (~76 m) which is already averaged from native 1 m.
     - **(A, medium, ~1 day)** Post-hoc destriping of the cached `meta_chmv2_*.tif` before the p90 step, via combined wavelet–FFT filtering (Münch et al. 2009; reference impl: [DHI-GRAS/rmstripes](https://github.com/DHI-GRAS/rmstripes), Python — call via `reticulate` or port to R with `wavethresh` + `fft`). FFT isolates the periodic vertical-frequency band; wavelet damps only the affected detail bands so real edges are preserved.
@@ -269,7 +270,6 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 ### Lower priority
 - **Incremental stack building**: The stack-building step at the end of `run_batch_nsw.R` re-reads all TIFs. For very large species lists, this is slow. Could build incrementally or defer to a separate script.
 - **Smooth plotting**: `plot_gam_smooths()` in `utils.R` saves a static PNG. Interactive HTML (e.g. via `plotly`) would make diagnosing smooth shapes much faster.
-- **Minimum duration filter**: Currently 5 minutes. eBird best practices suggest 10 minutes is more reliable. Worth testing via CV before changing.
 
 ---
 
