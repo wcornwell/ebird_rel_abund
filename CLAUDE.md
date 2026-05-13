@@ -26,6 +26,7 @@ ebird_rel_abund/
 │   └── tests/testthat/      # Unit tests per module
 │
 ├── run_batch_nsw.R          # MAIN PIPELINE — full NSW batch run
+├── build_observer_expertise.R  # Stage 1 calibration — observer expertise BLUPs
 ├── nsw_species_list.R       # Generate nsw_species_list.csv from raw EBD
 ├── rez_abundance.R          # Post-processing: per-REZ abundance stats + plots
 │
@@ -43,6 +44,12 @@ ebird_rel_abund/
 │   ├── zerofilled_*.rds     # Per-species zero-filled checklists (~490 files)
 │   ├── cov_stack_v3_*.tif   # Covariate raster stack (bbox + version keyed)
 │   └── gadm/, climate/, elevation/, landuse/, population/  # Downloaded tiles
+│
+├── ebirdabund_cache_nsw_buffer/  # Region-specific cache (do not commit)
+│   ├── zerofilled_*.rds         # Per-species, NSW+buffer pool
+│   ├── sampling_master.rds      # Shared sampling pool + covariates + expertise
+│   ├── x_count_ids.rds          # Checklists with any X-count entry
+│   └── observer_expertise.rds   # Stage 1 BLUPs (run build_observer_expertise.R)
 │
 ├── species_maps/            # Per-species output (do not commit)
 │   ├── 3km/*.tif            # abd + abd_se layers at 3 km
@@ -98,7 +105,19 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
    → reads NSW sampling + EBD, computes reporting rates
    → writes nsw_species_list.csv  (run once per EBD update)
 
-2. run_batch_nsw.R  (main run)
+2. build_observer_expertise.R  (Stage 1 calibration — run once after pre-cache,
+   before run_batch_nsw.R; ~overnight on the full buffered region)
+   → reads all 5 sampling + EBD files, computes species count per checklist
+   → filters to observers with >= 20 complete checklists (drops rare contributors
+     whose BLUPs would be heavily shrunk anyway)
+   → fits a single global NB GAM: n_species ~ effort smooths + protocol_type +
+     s(observer_id, bs="re"), via mgcv::bam
+   → extracts per-observer random-effect BLUPs as the expertise score
+   → writes ebirdabund_cache_nsw_buffer/observer_expertise.rds
+   After this completes, delete ebirdabund_cache_nsw_buffer/sampling_master.rds
+   so it rebuilds with observer_expertise attached on the next batch run.
+
+3. run_batch_nsw.R  (main run)
    a. POLYGON: NSW state boundary + 100 km buffer (GDA94/Albers, EPSG:3577)
       — includes all of ACT and border regions of VIC/QLD/SA as training data
    b. PRE-CACHE: reads all 5 state sampling files filtered to buffered bbox,
@@ -115,15 +134,17 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
       (set automatically in the script from the stored key).
    d. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC once →
       cov_stack_v4_{bbox}.tif in ebirdabund_cache/ (bbox-keyed, shared)
-   e. BATCH: estimate_abundance_batch() — parallel GAM per species
+   e. SAMPLING MASTER: one-time covariate extraction + observer_expertise join
+      → sampling_master.rds. Built on first call to prepare_sampling_master().
+   f. BATCH: estimate_abundance_batch() — parallel GAM per species
       For each species:
-        load_ebird() [uses cache] → extract_covariates() → subsample_hex()
+        load_ebird() [uses cache + expertise] → subsample_hex()
         → fit_gam() → predict_abundance() [two resolutions] → save .tif + .png
         Map PNGs include NSW state border overlay for reference.
-   f. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
-   g. LOG: append to batch_nsw_log.csv after each chunk
+   g. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
+   h. LOG: append to batch_nsw_log.csv after each chunk
 
-3. rez_abundance.R  (post-processing, run after batch)
+4. rez_abundance.R  (post-processing, run after batch)
    → loads stack + REZ polygons + zerofilled cache (ebirdabund_cache_nsw_buffer/)
    → per REZ: mean abundance, checklist frequency, mean count
    → writes top50_{rez}.png + abundance_{rez}.csv
@@ -148,6 +169,9 @@ To re-run from scratch: delete `species_maps/`, `ebirdabund_cache_nsw_buffer/`, 
 - `log1p(effort_distance_km)` — k=4 (log1p because stationary counts = 0)
 - `number_observers` — k=4
 - `protocol_type` — parametric factor
+- `observer_expertise` — k=5, added only when `observer_expertise.rds` exists
+  in the cache (see Observer Expertise below). Predicted at the median score
+  across training data → values represent the population-average observer.
 
 **Habitat covariates** (abundance signal):
 - Land cover fractions from ESA WorldCover: `lc_trees`, `lc_grassland`, `lc_cropland`, `lc_built` — k=4 (excludes `lc_shrubs`, collinear)
@@ -168,6 +192,44 @@ Effort covariates are log-transformed because they are right-skewed and the log 
 **Exclusion criteria**: fewer than 50 positive checklists after hex subsampling, or model sum ≤ 1e-5 across the polygon.
 
 **Range masking**: ebirdst 2023 preferred; falls back to BOTW 2025 if the species is not in the ebirdst catalogue or if the ebirdst mask produces zero abundance over the study region. ~266 of 479 modelled NSW species are in the ebirdst 2023 catalogue. Ranges are pre-downloaded by `run_batch_nsw.R` before the batch (download step is skipped for species already cached locally). The `range_source` column in `batch_nsw_log.csv` records which source was used per species.
+
+---
+
+## Observer Expertise (Stage 1)
+
+eBird checklists are submitted by observers of varying skill. Without controlling for this, per-observer variance leaks into the effort and habitat smooths, biasing predictions toward what frequently-active (often more skilled) observers report. Following **Kelling et al. (2015, *PLoS ONE*)** and **Johnston et al. (2021, *Diversity & Distributions*)**, we partition observer skill out of the per-species models via a two-stage approach.
+
+**Stage 1 — global calibration** (`build_observer_expertise.R`, run once):
+
+1. Read all 5 sampling files (NSW + ACT + VIC + QLD + SA) and clip to the buffered polygon.
+2. Scan all 5 EBD files once and compute `n_species` = number of distinct species reported per complete checklist (all rows, including X-counts — they still indicate detection).
+3. Apply the same effort/time filters as `clean_ebird()` (duration 5–300 min, distance ≤ 10 km, ≤ 10 observers).
+4. Drop observers with fewer than 20 qualifying complete checklists (`MIN_CHECKLISTS_PER_OBSERVER`); their BLUPs would be heavily shrunk anyway and the level cardinality makes `bs="re"` expensive.
+5. Apply the same hex × week subsampling used per-species (`spacing_km = 5`).
+6. Fit a single global negative-binomial GAM:
+
+   ```r
+   n_species ~ s(log(duration_minutes), k = 5) +
+               s(log1p(effort_distance_km), k = 5) +
+               s(time_observations_started, bs = "cc", k = 7) +
+               s(day_of_year, bs = "cc", k = 7) +
+               protocol_type +
+               s(observer_id, bs = "re")
+   ```
+
+7. Extract the observer random-effect BLUPs and save as `ebirdabund_cache_nsw_buffer/observer_expertise.rds` (a small data frame: `observer_id`, `expertise`, plus attributes recording the fit metadata).
+
+The fit is expensive — on a single Superb Fairywren species (387k × 13k observers) `bs="re"` took ~15 h. The Stage 1 fit operates on a similar row count but with more observer levels (~20k after the activity filter), so expect overnight runtime. Re-run only when the EBD or polygon changes.
+
+**Stage 2 — use in per-species models** (automatic):
+
+`attach_observer_expertise()` in `load_ebird.R` joins the score onto each species' training data via `observer_id`. Observers not in the calibration set (rare contributors, or first-time appearances) are assigned the median expertise so they contribute at the population-average level. `observer_id` is dropped after the join. `build_gam_formula()` then adds `s(observer_expertise, k=5)` to the per-species formula. `predict_abundance()` sets `observer_expertise` to the median across training data so the standardised-effort prediction is for an average-skill observer (cf. eBird Status & Trends, which predicts at the *top* of the skill distribution — an "expert eBirder").
+
+**One-species sanity check before Stage 1 was operationalised** (`analysis/test_observer_re.R`): for Superb Fairywren, adding `s(observer_id, bs="re")` directly to the per-species formula dropped the per-cell mean predicted abundance from 1.262 to 0.898 (ratio 0.71). That is, ~30 % of the "high numbers" feeling was observer-skill variance bleeding into the other smooths. The expertise-score approach in Stage 1 + Stage 2 is the citable, scalable form of the same correction.
+
+**If `observer_expertise.rds` is absent**, the pipeline runs as before — no observer term, no expertise join — so Stage 1 is a strict add-on.
+
+**Cache rebuild order after Stage 1:** the sampling master is built once and reused for every species; if it predates Stage 1 it won't carry the expertise column. Delete `ebirdabund_cache_nsw_buffer/sampling_master.rds` after running `build_observer_expertise.R` so the next batch rebuilds the master with expertise attached.
 
 ---
 

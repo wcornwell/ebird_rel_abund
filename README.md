@@ -150,7 +150,18 @@ The circular mean is used for both reference date and reference time so that spe
 | Map | Base-R `plot()` with `fields::image.plot` legend | `ggplot2` map returned as a list element |
 | Batch zero-abundance check | N/A | Species with negligible predicted polygon abundance (sum ≤ 10⁻⁵) excluded automatically in `estimate_abundance_batch()` |
 
-### 8. API and usability
+### 8. Observer expertise
+
+| | Strimas-Mackey et al. (2023) | `ebirdabund` |
+|---|---|---|
+| Observer skill | Not modelled | Optional Stage 1 calibration → per-species `s(observer_expertise)` smooth |
+| Citation | — | Kelling et al. 2015 (*PLoS ONE*); Johnston et al. 2021 (*Diversity & Distributions*) |
+
+The Cornell tutorial includes `number_observers` (party size on the checklist) but no term for *who* the observer is. Observer skill is known to vary substantially across eBird contributors and is included in the production eBird Status & Trends models (Fink et al.). `ebirdabund` follows the published methodology of Kelling et al. (2015) and Johnston et al. (2021): fit a single global negative-binomial GAM regressing species count per complete checklist on effort covariates with a per-observer random intercept, and use the resulting BLUPs as a continuous per-observer expertise score. The score is then included as `s(observer_expertise)` in each per-species GAM. Predictions are made at the *median* expertise across training data, so the standardised-effort surface represents an average-skill observer.
+
+The Stage 1 calibration runs once via `build_observer_expertise.R` and writes `observer_expertise.rds` into the per-region cache directory. If that file is absent, the per-species pipeline behaves exactly as the tutorial does (no observer term). For a single-species sanity check before generalising, fitting `s(observer_id, bs = "re")` directly into the per-species formula for Superb Fairywren (NSW + 100 km buffer, 387k subsampled checklists, 13k unique observers) dropped per-cell mean predicted abundance by a factor of 0.71 — most of the previously unaccounted observer-skill variance had been bleeding into the habitat smooths. The Stage 1 expertise score is the scalable, citable form of this correction.
+
+### 9. API and usability
 
 | | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
@@ -169,3 +180,4 @@ The package implements the core pipeline of Strimas-Mackey et al. (2023) — spa
 4. Using `bam()` for scalability, with cyclic splines for periodically-bounded predictors, data-driven `k`, and `gamma = 1.4` to reduce over-fitting.
 5. Providing `evaluate_model_cv()` and `compare_covariate_models()` for post-hoc assessment of model skill.
 6. Adding range masking, a prediction cap, and a log-scale SE output to improve map quality.
+7. Optionally including a per-observer expertise score (Kelling et al. 2015; Johnston et al. 2021) so per-species predictions represent an average-skill observer rather than absorbing observer-skill variance into the habitat smooths.

@@ -80,12 +80,12 @@ read_sampling <- function(sampling_txt, bbox, date_cutoff = NULL) {
     raw <- c("SAMPLING EVENT IDENTIFIER", "LATITUDE", "LONGITUDE",
              "OBSERVATION DATE", "TIME OBSERVATIONS STARTED",
              "DURATION MINUTES", "EFFORT DISTANCE KM",
-             "NUMBER OBSERVERS", "PROTOCOL NAME")
+             "NUMBER OBSERVERS", "PROTOCOL NAME", "OBSERVER ID")
     df  <- df[, raw, drop = FALSE]
     names(df) <- c("checklist_id", "latitude", "longitude",
                    "observation_date", "time_observations_started",
                    "duration_minutes", "effort_distance_km",
-                   "number_observers", "protocol_type")
+                   "number_observers", "protocol_type", "observer_id")
     df
   }
 
@@ -262,6 +262,31 @@ clean_ebird <- function(zf, max_count = 200L) {
     dplyr::filter(.data$observation_count <= max_count)
 }
 
+# Attach the per-observer expertise score from observer_expertise.rds onto a
+# data frame containing observer_id, then drop observer_id. Observers absent
+# from the calibration set are assigned the median score so they contribute
+# at the population-average level. No-op if the score file isn't present.
+attach_observer_expertise <- function(df, cache_dir) {
+  if (!"observer_id" %in% names(df)) return(df)
+  exp_f <- file.path(cache_dir, "observer_expertise.rds")
+  if (!file.exists(exp_f)) {
+    df$observer_id <- NULL
+    return(df)
+  }
+  exp     <- readRDS(exp_f)
+  exp_med <- stats::median(exp$expertise, na.rm = TRUE)
+  df      <- merge(df, exp, by = "observer_id", all.x = TRUE)
+  n_na    <- sum(is.na(df$expertise))
+  df$expertise[is.na(df$expertise)] <- exp_med
+  names(df)[names(df) == "expertise"] <- "observer_expertise"
+  df$observer_id <- NULL
+  message(sprintf(
+    "  Observer expertise attached (%d / %d rows fell back to median %.3f).",
+    n_na, nrow(df), exp_med
+  ))
+  df
+}
+
 # Build a sampling master: raw sampling rows clipped to polygon with covariates
 # pre-extracted. Saved as {cache_dir}/sampling_master.rds.
 #
@@ -302,6 +327,10 @@ prepare_sampling_master <- function(sampling_txt, polygon, cov_stack, cache_dir)
   samp_sf <- sf::st_as_sf(samp, coords = c("longitude", "latitude"),
                            crs = 4326, remove = FALSE)
   samp    <- sf::st_drop_geometry(sf::st_filter(samp_sf, polygon_wgs84))
+
+  # Attach observer expertise scores (and drop observer_id) if Stage 1
+  # calibration has been run (observer_expertise.rds in cache_dir).
+  samp <- attach_observer_expertise(samp, cache_dir)
 
   # Extract covariates once for all checklist locations
   samp <- extract_covariates(samp, cov_stack)
@@ -374,6 +403,7 @@ load_ebird <- function(polygon, ebird_zip, sampling_txt, species, cache_dir,
   }
 
   zf <- clean_ebird(zf, max_count = max_count)
+  zf <- attach_observer_expertise(zf, cache_dir)
 
   if (nrow(zf) == 0) {
     stop(

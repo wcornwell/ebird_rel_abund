@@ -21,6 +21,18 @@ build_gam_formula <- function(df, hab_cols) {
     "protocol_type"
   )
 
+  # Observer-skill term. We use a continuous per-observer expertise score
+  # computed once by a Stage 1 calibration GAM (see
+  # build_observer_expertise.R) following Kelling et al. (2015) and
+  # Johnston et al. (2021). At prediction time we predict at the median score
+  # so values represent the population-average observer.
+  if ("observer_expertise" %in% names(df) &&
+      length(unique(stats::na.omit(df$observer_expertise))) >= 5L) {
+    effort_terms <- c(effort_terms,
+                      sprintf("s(observer_expertise, k = %d)",
+                              sk("observer_expertise", 5L)))
+  }
+
   # Right-skewed covariates spanning wide ranges benefit from log scaling so
   # knots are distributed more evenly across the data.
   log1p_cols <- c("pop_density", "tree_height")  # include zeros

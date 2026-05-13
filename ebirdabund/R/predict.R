@@ -24,13 +24,22 @@ predict_abundance <- function(model, pred_surface, polygon,
   train <- model$model
   proto <- ref_protocol(model)
 
+  # Detect the observer-expertise smooth so we can predict at the median
+  # expertise across training data, i.e. the population-average observer
+  # (cf. Kelling et al. 2015; Johnston et al. 2021).
+  smooth_labels    <- vapply(model$smooth, `[[`, character(1), "label")
+  has_expertise    <- any(grepl("^s\\(observer_expertise\\)", smooth_labels))
+  expertise_median <- if (has_expertise) {
+    stats::median(train$observer_expertise, na.rm = TRUE)
+  } else NULL
+
   if (is.null(peak_doy) || is.null(peak_time)) {
     # Build reference row from the prediction surface — it has raw column names
     # (e.g. precip_annual, not log(precip_annual)) that predict.gam expects.
     # The model frame (model$model) stores transformed names so cannot be used.
     non_hab <- c("day_of_year", "time_observations_started", "duration_minutes",
                  "effort_distance_km", "number_observers", "protocol_type",
-                 "longitude", "latitude")
+                 "observer_expertise", "longitude", "latitude")
     hab_cols <- setdiff(names(pred_surface), non_hab)
 
     ref_base <- as.data.frame(lapply(
@@ -41,6 +50,7 @@ predict_abundance <- function(model, pred_surface, polygon,
     ref_base$effort_distance_km <- 1
     ref_base$number_observers   <- 1L
     ref_base$protocol_type      <- factor(proto, levels = levels(train$protocol_type))
+    if (has_expertise) ref_base$observer_expertise <- expertise_median
 
     lcl <- function(df) {
       p <- mgcv::predict.gam(model, newdata = df, type = "link", se.fit = TRUE)
@@ -78,6 +88,7 @@ predict_abundance <- function(model, pred_surface, polygon,
         proto, levels = levels(train$protocol_type)
       )
     )
+  if (has_expertise) pred_data$observer_expertise <- expertise_median
 
   message(sprintf("Predicting at %d grid points...", nrow(pred_data)))
   preds <- mgcv::predict.gam(
