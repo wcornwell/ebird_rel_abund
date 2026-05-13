@@ -1,0 +1,56 @@
+# eBird Relative Abundance Pipeline Configuration — Victoria (EXAMPLE)
+# This is an example showing how to swap regions by creating a new config file.
+# To use this for Victoria:
+#   1. Set: export EBIRD_CONFIG=config_example_victoria.yaml
+#   2. Or: EBIRD_CONFIG=config_example_victoria.yaml Rscript run_batch_nsw.R
+
+region: Victoria
+description: Victoria + 100 km buffer (NSW, SA for training data)
+
+# Raw eBird data directory
+raw_data: ebirdabund/raw_data
+
+# EBD observation files (primary region first)
+ebd_files:
+  - ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026.txt
+  - ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026.txt
+  - ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026.txt
+
+# Sampling files (must correspond 1:1 with ebd_files)
+sampling_files:
+  - ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026_sampling.txt
+  - ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026_sampling.txt
+  - ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026_sampling.txt
+
+# Species list CSV
+species_list_file: vic_species_list.csv
+
+# Taxonomy lookup
+taxonomy_file: vic_ebird_taxonomy.csv
+
+# Cache directories (region-specific zerofill cache)
+covariate_cache: ebirdabund_cache
+zerofill_cache: ebirdabund_cache_vic_buffer
+
+# Output directories
+output_dir: species_maps_vic
+log_file: batch_vic_log.csv
+
+# BirdLife range polygon
+botw_path: botw_species/BOTW_2025.gpkg
+
+# Prediction grid resolutions (km)
+grid_resolutions_km:
+  - 3
+  - 9
+
+# Species reporting rate threshold
+reporting_rate_threshold: 0.005
+
+# Study polygon parameters
+study_polygon:
+  country: AUS
+  region: Victoria
+  buffer_metres: 100000
+  proj_processing: 3577
+  proj_output: 4326

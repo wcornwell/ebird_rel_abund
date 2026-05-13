@@ -1,0 +1,59 @@
+# eBird Relative Abundance Pipeline Configuration
+# Point to different regional configs by changing the config file path in run_batch_nsw.R
+
+region: NSW
+description: NSW + 100 km buffer (ACT, VIC, QLD, SA for training data)
+
+# Raw eBird data directory
+raw_data: ebirdabund/raw_data
+
+# EBD observation files (in order, typically NSW first for primary region)
+ebd_files:
+  - ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026.txt
+  - ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026.txt
+  - ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026.txt
+  - ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026.txt
+  - ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026.txt
+
+# Sampling files (must correspond 1:1 with ebd_files in same order)
+sampling_files:
+  - ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026_sampling.txt
+  - ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026_sampling.txt
+  - ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026_sampling.txt
+  - ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026_sampling.txt
+  - ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026_sampling.txt
+
+# Species list CSV (common_name, scientific_name, reporting_rate, etc.)
+species_list_file: nsw_species_list.csv
+
+# Taxonomy lookup (common_name -> scientific_name)
+taxonomy_file: nsw_ebird_taxonomy.csv
+
+# Cache directories
+# - covariate_cache: shared across all regions (contains GADM, climate tiles, etc.)
+# - zerofill_cache: region-specific (per-species zero-filled checklists keyed to polygon/EBD)
+covariate_cache: ebirdabund_cache
+zerofill_cache: ebirdabund_cache_nsw_buffer
+
+# Output directories
+output_dir: species_maps
+log_file: batch_nsw_log.csv
+
+# BirdLife range polygon (for masking when ebirdst unavailable)
+botw_path: botw_species/BOTW_2025.gpkg
+
+# Prediction grid resolutions (km)
+grid_resolutions_km:
+  - 3
+  - 9
+
+# Species reporting rate threshold (keep only species >= this fraction)
+reporting_rate_threshold: 0.005
+
+# Study polygon parameters
+study_polygon:
+  country: AUS
+  region: New South Wales
+  buffer_metres: 100000       # buffer for training data polygon
+  proj_processing: 3577       # GDA94/Albers for geometry ops
+  proj_output: 4326           # WGS84 for output

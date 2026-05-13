@@ -26,11 +26,12 @@ ebird_rel_abund/
 │   └── tests/testthat/      # Unit tests per module
 │
 ├── run_batch_nsw.R          # MAIN PIPELINE — full NSW batch run
-├── build_observer_expertise.R  # Stage 1 calibration — observer expertise BLUPs
 ├── nsw_species_list.R       # Generate nsw_species_list.csv from raw EBD
 ├── rez_abundance.R          # Post-processing: per-REZ abundance stats + plots
 │
-├── analysis/                # Exploratory and evaluation scripts
+├── analysis/                # Exploratory, evaluation, and one-off scripts
+│   ├── analysis/build_observer_expertise.R  # Stage 1 calibration — observer expertise BLUPs
+│   ├── test_observer_re.R       # One-species sanity check for the observer term
 │   ├── test_tweedie_vs_nb.R     # CV comparison: Tweedie vs NB family
 │   ├── test_log_transforms.R    # CV comparison: linear vs log-transformed predictors
 │   ├── test_pop_density.R       # F-stat analysis of pop_density across 40 species
@@ -49,7 +50,7 @@ ebird_rel_abund/
 │   ├── zerofilled_*.rds         # Per-species, NSW+buffer pool
 │   ├── sampling_master.rds      # Shared sampling pool + covariates + expertise
 │   ├── x_count_ids.rds          # Checklists with any X-count entry
-│   └── observer_expertise.rds   # Stage 1 BLUPs (run build_observer_expertise.R)
+│   └── observer_expertise.rds   # Stage 1 BLUPs (run analysis/build_observer_expertise.R)
 │
 ├── species_maps/            # Per-species output (do not commit)
 │   ├── 3km/*.tif            # abd + abd_se layers at 3 km
@@ -105,7 +106,7 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
    → reads NSW sampling + EBD, computes reporting rates
    → writes nsw_species_list.csv  (run once per EBD update)
 
-2. build_observer_expertise.R  (Stage 1 calibration — run once after pre-cache,
+2. analysis/build_observer_expertise.R  (Stage 1 calibration — run once after pre-cache,
    before run_batch_nsw.R; ~overnight on the full buffered region)
    → reads all 5 sampling + EBD files, computes species count per checklist
    → filters to observers with >= 20 complete checklists (drops rare contributors
@@ -199,7 +200,7 @@ Effort covariates are log-transformed because they are right-skewed and the log 
 
 eBird checklists are submitted by observers of varying skill. Without controlling for this, per-observer variance leaks into the effort and habitat smooths, biasing predictions toward what frequently-active (often more skilled) observers report. Following **Kelling et al. (2015, *PLoS ONE*)** and **Johnston et al. (2021, *Diversity & Distributions*)**, we partition observer skill out of the per-species models via a two-stage approach.
 
-**Stage 1 — global calibration** (`build_observer_expertise.R`, run once):
+**Stage 1 — global calibration** (`analysis/build_observer_expertise.R`, run once):
 
 1. Read all 5 sampling files (NSW + ACT + VIC + QLD + SA) and clip to the buffered polygon.
 2. Scan all 5 EBD files once and compute `n_species` = number of distinct species reported per complete checklist (all rows, including X-counts — they still indicate detection).
@@ -229,7 +230,7 @@ The fit is expensive — on a single Superb Fairywren species (387k × 13k obser
 
 **If `observer_expertise.rds` is absent**, the pipeline runs as before — no observer term, no expertise join — so Stage 1 is a strict add-on.
 
-**Cache rebuild order after Stage 1:** the sampling master is built once and reused for every species; if it predates Stage 1 it won't carry the expertise column. Delete `ebirdabund_cache_nsw_buffer/sampling_master.rds` after running `build_observer_expertise.R` so the next batch rebuilds the master with expertise attached.
+**Cache rebuild order after Stage 1:** the sampling master is built once and reused for every species; if it predates Stage 1 it won't carry the expertise column. Delete `ebirdabund_cache_nsw_buffer/sampling_master.rds` after running `analysis/build_observer_expertise.R` so the next batch rebuilds the master with expertise attached.
 
 ---
 
@@ -250,7 +251,7 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 
 ### High priority
 - **X-count checklists**: ~~Currently excluded in `clean_ebird()` *after* zero-fill.~~ **Done** — the pre-cache step in `run_batch_nsw.R` now captures every checklist with an X count for *any* species (via `read_ebd_observations(..., return_x_count_ids = TRUE)`) and drops them from the shared sampling pool before `zero_fill()`. The IDs are persisted to `ZEROFILL_CACHE/x_count_ids.rds` so `prepare_sampling_master()` and the slow-path `load_ebird()` apply the same filter. `clean_ebird()` retains its `observation_count != "X"` filter as a safety net for code paths that bypass the pre-cache. To apply the fix to a cache built before this change, delete `ZEROFILL_CACHE/zerofilled_*.rds` and `sampling_master.rds` and re-run.
-- **Config file**: `run_batch_nsw.R` still has hard-coded paths at the top (EBD files, cache dirs, output dirs). Extracting these into a `config.R` or YAML would make it easier to point the same script at a different region.
+- **Config file**: ~~`run_batch_nsw.R` still has hard-coded paths at the top (EBD files, cache dirs, output dirs).~~ **Done** — `run_batch_nsw.R` now loads all configuration from `config.yaml` via `yaml::read_yaml()`. The config specifies EBD paths, cache dirs, output dirs, study polygon, species list, and thresholds in one place. To switch regions, set `EBIRD_CONFIG=config_yourregion.yaml` and run the same script. Example: `config_example_victoria.yaml` shows how to configure for a different region. See `CONFIG.md` for detailed configuration guide.
 - **EBD column index brittleness**: ~~Columns 6, 11, 35 are hard-coded.~~ **Done** — `validate_ebd_header()` now checks column names at those positions before any `fread` call.
 
 ### Medium priority

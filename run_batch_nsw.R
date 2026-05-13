@@ -4,48 +4,62 @@ suppressPackageStartupMessages({
   library(terra)
   library(geodata)
   library(data.table)
+  library(yaml)
 })
 
-RAW_DATA <- "ebirdabund/raw_data"
-EBD <- c(
-  file.path(RAW_DATA, "ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026.txt"),
-  file.path(RAW_DATA, "ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026.txt"),
-  file.path(RAW_DATA, "ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026.txt"),
-  file.path(RAW_DATA, "ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026.txt"),
-  file.path(RAW_DATA, "ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026.txt")
-)
-SAMP <- c(
-  file.path(RAW_DATA, "ebd_AU-NSW_unv_smp_relFeb-2026/ebd_AU-NSW_unv_smp_relFeb-2026_sampling.txt"),
-  file.path(RAW_DATA, "ebd_AU-ACT_unv_smp_relMar-2026/ebd_AU-ACT_unv_smp_relMar-2026_sampling.txt"),
-  file.path(RAW_DATA, "ebd_AU-VIC_unv_smp_relMar-2026/ebd_AU-VIC_unv_smp_relMar-2026_sampling.txt"),
-  file.path(RAW_DATA, "ebd_AU-QLD_unv_smp_relMar-2026/ebd_AU-QLD_unv_smp_relMar-2026_sampling.txt"),
-  file.path(RAW_DATA, "ebd_AU-SA_unv_smp_relMar-2026/ebd_AU-SA_unv_smp_relMar-2026_sampling.txt")
-)
-CACHE          <- "ebirdabund_cache"          # covariate tiles, GADM — shared across runs
-ZEROFILL_CACHE <- "ebirdabund_cache_nsw_buffer"  # per-species zerofills — bbox-specific
-OUTPUT_DIR  <- "species_maps"
-LOG_FILE    <- "batch_nsw_log.csv"
-BOTW_PATH   <- "botw_species/BOTW_2025.gpkg"
-TAXONOMY    <- "nsw_ebird_taxonomy.csv"
-GRID_RES_KM <- c(3, 9)
+# ── Load configuration ─────────────────────────────────────────────────────────
+# Point CONFIG_FILE to a different region config to switch regions (e.g., "config_victoria.yaml")
+CONFIG_FILE <- Sys.getenv("EBIRD_CONFIG", "config.yaml")
+if (!file.exists(CONFIG_FILE)) {
+  stop(sprintf("Config file not found: %s\n(Set EBIRD_CONFIG env var to override)", CONFIG_FILE))
+}
+cfg <- yaml::read_yaml(CONFIG_FILE)
+
+# Construct full paths (EBD/sampling files are relative to raw_data/)
+RAW_DATA <- cfg$raw_data
+EBD <- file.path(RAW_DATA, cfg$ebd_files)
+SAMP <- file.path(RAW_DATA, cfg$sampling_files)
+
+# Cache and output directories
+CACHE          <- cfg$covariate_cache
+ZEROFILL_CACHE <- cfg$zerofill_cache
+OUTPUT_DIR     <- cfg$output_dir
+LOG_FILE       <- cfg$log_file
+BOTW_PATH      <- cfg$botw_path
+TAXONOMY       <- cfg$taxonomy_file
+GRID_RES_KM    <- unlist(cfg$grid_resolutions_km)
+
+# Study polygon configuration
+STUDY_BBOX_COUNTRY <- cfg$study_polygon$country
+STUDY_BBOX_REGION  <- cfg$study_polygon$region
+STUDY_BBOX_BUFFER_M <- cfg$study_polygon$buffer_metres
+PROJ_PROCESSING    <- cfg$study_polygon$proj_processing
+PROJ_OUTPUT        <- cfg$study_polygon$proj_output
+
+# Species filtering threshold
+REPORTING_RATE_THRESHOLD <- cfg$reporting_rate_threshold
+
+message(sprintf("Config loaded from: %s", CONFIG_FILE))
+message(sprintf("Region: %s", cfg$region))
 
 dir.create(ZEROFILL_CACHE, showWarnings = FALSE, recursive = TRUE)
 
 # ── Species list ──────────────────────────────────────────────────────────────
 # reporting_rate is already computed against effort-filtered complete checklists
 # (see nsw_species_list.R), so this threshold is applied to the correct base.
-species_df   <- read.csv("nsw_species_list.csv", stringsAsFactors = FALSE)
-species_df   <- species_df[species_df$reporting_rate >= 0.005, ]
+species_df   <- read.csv(cfg$species_list_file, stringsAsFactors = FALSE)
+species_df   <- species_df[species_df$reporting_rate >= REPORTING_RATE_THRESHOLD, ]
 species_list <- species_df$common_name
-message(sprintf("Species to process: %d (reporting_rate >= 0.5%%)", length(species_list)))
+message(sprintf("Species to process: %d (reporting_rate >= %.1f%%)", 
+                length(species_list), REPORTING_RATE_THRESHOLD * 100))
 
-# ── Study polygon: NSW + 100 km buffer ────────────────────────────────────────
-message("Getting NSW boundary (+ 100 km buffer for training data)...")
-aus        <- geodata::gadm(country = "AUS", level = 1, path = CACHE)
-nsw        <- sf::st_as_sf(aus[aus$NAME_1 == "New South Wales", ])
+message(sprintf("Getting %s boundary (+ %d m buffer for training data)...", 
+              STUDY_BBOX_REGION, STUDY_BBOX_BUFFER_M))
+aus        <- geodata::gadm(country = STUDY_BBOX_COUNTRY, level = 1, path = CACHE)
+region_sf  <- sf::st_as_sf(aus[aus$NAME_1 == STUDY_BBOX_REGION, ])
 polygon    <- sf::st_transform(
-  sf::st_buffer(sf::st_transform(nsw, 3577), 100000),  # GDA94/Albers, metres
-  4326
+  sf::st_buffer(sf::st_transform(region_sf, PROJ_PROCESSING), STUDY_BBOX_BUFFER_M),
+  PROJ_OUTPUT
 )
 study_bbox <- as.numeric(sf::st_bbox(polygon))
 
