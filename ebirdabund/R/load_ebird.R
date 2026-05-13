@@ -236,7 +236,7 @@ clean_ebird <- function(zf, max_count = 200L) {
   zf |>
     dplyr::filter(
       .data$observation_count != "X",
-      .data$duration_minutes >= 5,
+      .data$duration_minutes >= 10,
       .data$duration_minutes <= 300,
       is.na(.data$effort_distance_km) | .data$effort_distance_km <= 10,
       .data$number_observers <= 10,
