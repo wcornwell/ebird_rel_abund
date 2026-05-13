@@ -121,11 +121,20 @@ read_sampling <- function(sampling_txt, bbox, date_cutoff = NULL) {
 #                        whose `common_name` is in this set are kept.
 # valid_checklist_ids  : optional character vector. If non-NULL, only rows
 #                        whose `checklist_id` is in this set are kept.
+# return_x_count_ids   : if TRUE, the unique set of checklist_ids that had
+#                        any observation_count == "X" is captured BEFORE the
+#                        species/checklist filters and returned alongside the
+#                        observation frame. Used by run_batch_*.R to filter
+#                        the shared sampling pool so every species has an
+#                        identical denominator.
 #
-# Returns a data.frame with columns common_name, observation_count, checklist_id.
+# Returns a data.frame with columns common_name, observation_count, checklist_id,
+# or — when return_x_count_ids = TRUE — a list with elements `obs` and
+# `x_count_ids`.
 read_ebd_observations <- function(ebd_txt,
                                   species_set         = NULL,
-                                  valid_checklist_ids = NULL) {
+                                  valid_checklist_ids = NULL,
+                                  return_x_count_ids  = FALSE) {
   if (!is.character(ebd_txt) || length(ebd_txt) == 0L) {
     stop("`ebd_txt` must be a non-empty character vector of file paths.")
   }
@@ -157,13 +166,46 @@ read_ebd_observations <- function(ebd_txt,
   ))
   names(df) <- c("common_name", "observation_count", "checklist_id")
 
+  # Capture X-count checklist IDs from the unfiltered data; this is the only
+  # place they're cheaply available across all species.
+  x_count_ids <- if (return_x_count_ids) {
+    unique(df[["checklist_id"]][df[["observation_count"]] == "X"])
+  } else NULL
+
   if (!is.null(species_set)) {
     df <- df[df[["common_name"]] %in% species_set, , drop = FALSE]
   }
   if (!is.null(valid_checklist_ids)) {
     df <- df[df[["checklist_id"]] %in% valid_checklist_ids, , drop = FALSE]
   }
-  df
+
+  if (return_x_count_ids) list(obs = df, x_count_ids = x_count_ids) else df
+}
+
+# Scan one or more EBD files for checklist IDs containing any observation_count
+# == "X" entry. Streams via awk + sort -u so memory stays bounded regardless of
+# EBD size. Use this when the per-species pre-cache scan is being skipped
+# (i.e. all per-species zerofills already exist) but a shared X-count filter
+# still needs to be applied.
+#
+# Returns a character vector of unique checklist IDs.
+find_x_count_checklists <- function(ebd_txt) {
+  if (!is.character(ebd_txt) || length(ebd_txt) == 0L) {
+    stop("`ebd_txt` must be a non-empty character vector of file paths.")
+  }
+  paths <- vapply(ebd_txt, resolve_ebird_path, character(1))
+  invisible(lapply(paths, validate_ebd_header))
+
+  message(sprintf("  Scanning %d EBD file(s) for X-count checklists...",
+                  length(paths)))
+  cmd <- paste(
+    "awk -F'\\t' 'FNR>1 && $11==\"X\"{print $35}'",
+    paste(shQuote(paths), collapse = " "),
+    "| sort -u"
+  )
+  res <- system(cmd, intern = TRUE)
+  message(sprintf("    Found %d unique X-count checklists.", length(res)))
+  res
 }
 
 # Single-species wrapper kept for backward compatibility with load_ebird()'s
@@ -184,7 +226,13 @@ zero_fill <- function(sampling_df, ebd_df) {
 }
 
 # Discard ecologically unreliable rows and standardise column types.
-clean_ebird <- function(zf) {
+#
+# The `observation_count != "X"` filter is retained as a safety net for code
+# paths that bypass the shared-pool X-count exclusion (e.g. single-species
+# slow path in load_ebird() when no x_count_ids.rds is present). When the
+# shared pool has already excluded X-count checklists from sampling, this
+# filter matches nothing.
+clean_ebird <- function(zf, max_count = 200L) {
   zf |>
     dplyr::filter(
       .data$observation_count != "X",
@@ -208,9 +256,10 @@ clean_ebird <- function(zf) {
       ),
       protocol_type             = factor(.data$protocol_type)
     ) |>
-    # Exclude mega-flock checklists: counts >500 reflect targeted non-random
-    # sampling (observer sought out the flock) rather than encounter-rate signal.
-    dplyr::filter(.data$observation_count <= 200)
+    # Exclude mega-flock checklists: very high counts reflect targeted non-
+    # random sampling (observer sought out the flock) rather than encounter-
+    # rate signal. Cap configurable via `max_count`; default 200.
+    dplyr::filter(.data$observation_count <= max_count)
 }
 
 # Build a sampling master: raw sampling rows clipped to polygon with covariates
@@ -235,6 +284,19 @@ prepare_sampling_master <- function(sampling_txt, polygon, cov_stack, cache_dir)
 
   message("Building sampling master (one-time covariate extraction for all species)...")
   samp <- read_sampling(sampling_txt, bbox)
+
+  # Apply shared-pool X-count filter: drop any checklist that had X for any
+  # species in the EBD, so every species sees an identical sampling pool.
+  # The IDs are written by the pre-cache step in run_batch_*.R.
+  x_ids_f <- file.path(cache_dir, "x_count_ids.rds")
+  if (file.exists(x_ids_f)) {
+    x_ids    <- readRDS(x_ids_f)
+    n_before <- nrow(samp)
+    samp     <- samp[!samp$checklist_id %in% x_ids, ]
+    if (nrow(samp) < n_before)
+      message(sprintf("  Dropped %d X-count checklists (shared-pool filter).",
+                      n_before - nrow(samp)))
+  }
 
   # Spatial clip (keeps only checklists inside the polygon, not just the bbox)
   samp_sf <- sf::st_as_sf(samp, coords = c("longitude", "latitude"),
@@ -265,13 +327,15 @@ prepare_sampling_master <- function(sampling_txt, polygon, cov_stack, cache_dir)
 # extract_covariates(), st_filter(), and drop_na(cov_cols) — the expensive
 # steps that are identical across all species.
 # Returns a flat data.frame with one row per checklist.
-load_ebird <- function(polygon, ebird_zip, sampling_txt, species, cache_dir) {
+load_ebird <- function(polygon, ebird_zip, sampling_txt, species, cache_dir,
+                       max_count = 200L) {
   polygon_wgs84 <- sf::st_transform(polygon, 4326)
   bb <- as.numeric(sf::st_bbox(polygon_wgs84))
 
   spp      <- safe_name(species)
   cache_f  <- file.path(cache_dir, sprintf("zerofilled_%s.rds", spp))
   master_f <- file.path(cache_dir, "sampling_master.rds")
+  x_ids_f  <- file.path(cache_dir, "x_count_ids.rds")
 
   # ── Fast path: sampling master available ─────────────────────────────────
   if (file.exists(master_f) && file.exists(cache_f)) {
@@ -282,7 +346,7 @@ load_ebird <- function(polygon, ebird_zip, sampling_txt, species, cache_dir) {
     zf      <- merge(master, obs, by = "checklist_id", all.x = TRUE)
     zf$observation_count[is.na(zf$observation_count)] <- "0"
     zf$species_observed <- zf$observation_count != "0"
-    zf <- clean_ebird(zf)
+    zf <- clean_ebird(zf, max_count = max_count)
     message(sprintf("Loaded %d checklists (%d with detections) inside polygon.",
                     nrow(zf), sum(zf$species_observed)))
     return(zf)
@@ -295,12 +359,21 @@ load_ebird <- function(polygon, ebird_zip, sampling_txt, species, cache_dir) {
   } else {
     ebd_txt  <- vapply(ebird_zip, resolve_ebird_path, character(1))
     sampling <- read_sampling(sampling_txt, bb)
+    # Shared-pool X-count filter (if pre-cache has populated it)
+    if (file.exists(x_ids_f)) {
+      x_ids    <- readRDS(x_ids_f)
+      n_before <- nrow(sampling)
+      sampling <- sampling[!sampling$checklist_id %in% x_ids, ]
+      if (nrow(sampling) < n_before)
+        message(sprintf("  Dropped %d X-count checklists (shared-pool filter).",
+                        n_before - nrow(sampling)))
+    }
     ebd_spp  <- read_ebd_species(ebd_txt, species)
     zf       <- zero_fill(sampling, ebd_spp)
     saveRDS(zf, cache_f)
   }
 
-  zf <- clean_ebird(zf)
+  zf <- clean_ebird(zf, max_count = max_count)
 
   if (nrow(zf) == 0) {
     stop(

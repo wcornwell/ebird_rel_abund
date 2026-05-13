@@ -124,6 +124,8 @@ cached      <- sub("^zerofilled_", "", sub("[.]rds$", "",
                list.files(ZEROFILL_CACHE, pattern = "zerofilled_.*[.]rds")))
 needs_cache <- species_list[!safe_name_local(species_list) %in% cached]
 
+X_IDS_FILE <- file.path(ZEROFILL_CACHE, "x_count_ids.rds")
+
 if (length(needs_cache) > 0) {
   message(sprintf(
     "\n── Pre-caching %d species with missing EBD cache (one EBD pass) ──",
@@ -134,13 +136,31 @@ if (length(needs_cache) > 0) {
   # complete checklists in one pass. read_ebd_observations() similarly accepts
   # a vector, validates each header, and concatenates results.
   sampling_df <- read_sampling(SAMP, study_bbox)
-  valid_ids   <- sampling_df$checklist_id
 
   message(sprintf("  Scanning %d EBD file(s) for %d uncached species...",
                   length(EBD), length(needs_cache)))
-  ebd_all <- read_ebd_observations(EBD,
-                                   species_set         = needs_cache,
-                                   valid_checklist_ids = valid_ids)
+  # return_x_count_ids = TRUE captures the union of X-count checklist IDs
+  # across ALL species in one pass — used to enforce a shared sampling pool.
+  ebd_result <- read_ebd_observations(
+    EBD,
+    species_set         = needs_cache,
+    valid_checklist_ids = sampling_df$checklist_id,
+    return_x_count_ids  = TRUE
+  )
+  ebd_all     <- ebd_result$obs
+  x_count_ids <- ebd_result$x_count_ids
+
+  # Persist for prepare_sampling_master() and any later slow-path load_ebird().
+  saveRDS(x_count_ids, X_IDS_FILE)
+  message(sprintf("  X-count checklists (any species): %d — saved to %s",
+                  length(x_count_ids), X_IDS_FILE))
+
+  # Drop them from the shared sampling pool BEFORE zero-fill so every species
+  # ends up with an identical denominator.
+  n_before    <- nrow(sampling_df)
+  sampling_df <- sampling_df[!sampling_df$checklist_id %in% x_count_ids, ]
+  message(sprintf("  Sampling pool: %d → %d after X-count exclusion.",
+                  n_before, nrow(sampling_df)))
 
   message(sprintf("  Building caches for %d species...", length(needs_cache)))
   for (i in seq_along(needs_cache)) {
@@ -152,9 +172,26 @@ if (length(needs_cache) > 0) {
     saveRDS(zero_fill(sampling_df, ebd_sp), cache_f)
     message(sprintf("    Cached (%d/%d): %s", i, length(needs_cache), sp))
   }
-  rm(sampling_df, ebd_all)
+  rm(sampling_df, ebd_all, ebd_result)
   gc()
   message("  Pre-caching complete.\n")
+} else if (!file.exists(X_IDS_FILE)) {
+  # All per-species caches exist but x_count_ids.rds is missing (caches were
+  # built before the shared-pool fix). Do a cheap awk-only scan so
+  # prepare_sampling_master() can apply the same filter to the master.
+  # Note: existing per-species caches still contain the X-count checklists as
+  # zero-detection rows; rebuild them (delete ZEROFILL_CACHE/zerofilled_*.rds)
+  # to fully realise the fix. The master-side filter at least aligns the
+  # denominator on future runs of fit_species_model().
+  message("\n── Populating X-count checklist IDs (no pre-cache needed) ───")
+  x_count_ids <- find_x_count_checklists(EBD)
+  saveRDS(x_count_ids, X_IDS_FILE)
+  warning(
+    "Existing zerofilled_*.rds caches were built before the shared-pool X-count ",
+    "fix. They still treat X-count checklists from non-focal species as ",
+    "zero-detection rows. Delete ", ZEROFILL_CACHE, "/zerofilled_*.rds and ",
+    "sampling_master.rds (and re-run this script) to fully apply the fix."
+  )
 }
 
 # ── Covariates (built once, shared across all workers) ────────────────────────
@@ -241,7 +278,8 @@ if (length(species_list) == 0) {
     botw_path    = BOTW_PATH,
     border       = nsw,
     output_dir   = OUTPUT_DIR,
-    log_file     = LOG_FILE
+    log_file     = LOG_FILE,
+    max_count    = 100L
   )
 
   t_total <- proc.time()[["elapsed"]] - t_start

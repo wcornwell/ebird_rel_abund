@@ -21,6 +21,8 @@
 #'   `"ebirdabund_cache"` in the working directory.
 #' @param hex_spacing_km Hex-cell diameter for spatiotemporal subsampling in
 #'   km. Default `5`.
+#' @param max_count Upper cap on observation count; checklists above this are
+#'   excluded (mega-flock filter). Default `200`.
 #'
 #' @return A list with:
 #' \describe{
@@ -39,7 +41,8 @@ fit_species_model <- function(polygon,
                               species,
                               cov_stack      = NULL,
                               cache_dir      = "ebirdabund_cache",
-                              hex_spacing_km = 5) {
+                              hex_spacing_km = 5,
+                              max_count      = 200L) {
 
   # ── Input validation ─────────────────────────────────────────────────────
   if (!inherits(polygon, "sf") && !inherits(polygon, "sfc")) {
@@ -62,7 +65,8 @@ fit_species_model <- function(polygon,
 
   # ── Step 1: Load and filter eBird data ───────────────────────────────────
   message("\n── Step 1/4: Loading eBird data ─────────────────────────────")
-  ebird_df <- load_ebird(polygon, ebird_zip, sampling_txt, species, cache_dir)
+  ebird_df <- load_ebird(polygon, ebird_zip, sampling_txt, species, cache_dir,
+                         max_count = max_count)
 
   # ── Step 2: Habitat covariate stack ──────────────────────────────────────
   message("\n── Step 2/4: Habitat covariates ─────────────────────────────")
@@ -299,6 +303,8 @@ predict_species_map <- function(model_fit,
 #' @param grid_res_km Prediction grid resolution in km. Default `1`.
 #' @param hex_spacing_km Hex-cell diameter for spatiotemporal subsampling in
 #'   km. Default `5`.
+#' @param max_count Upper cap on observation count (mega-flock filter).
+#'   Default `200`.
 #' @param peak_time Optional decimal-hour override for observation start time
 #'   used in predictions. Estimated from the model when `NULL`.
 #' @param use_range If `TRUE` (default), cells outside the eBird species range
@@ -355,6 +361,7 @@ estimate_abundance <- function(polygon,
                                cache_dir        = "ebirdabund_cache",
                                grid_res_km      = 1,
                                hex_spacing_km   = 5,
+                               max_count        = 200L,
                                peak_doy         = NULL,
                                peak_time        = NULL,
                                use_range        = TRUE,
@@ -368,7 +375,8 @@ estimate_abundance <- function(polygon,
     species        = species,
     cov_stack      = cov_stack,
     cache_dir      = cache_dir,
-    hex_spacing_km = hex_spacing_km
+    hex_spacing_km = hex_spacing_km,
+    max_count      = max_count
   )
 
   pred_out <- predict_species_map(

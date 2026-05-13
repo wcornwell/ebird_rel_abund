@@ -102,8 +102,12 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
    a. POLYGON: NSW state boundary + 100 km buffer (GDA94/Albers, EPSG:3577)
       — includes all of ACT and border regions of VIC/QLD/SA as training data
    b. PRE-CACHE: reads all 5 state sampling files filtered to buffered bbox,
-      then scans all 5 EBD files → zerofilled_{species}.rds per species in
-      ebirdabund_cache_nsw_buffer/  (prevents parallel workers competing for files)
+      then scans all 5 EBD files once. From that scan it (i) collects the
+      union of checklist IDs with any X-count entry → x_count_ids.rds,
+      (ii) drops those checklists from the shared sampling pool, then
+      (iii) writes zerofilled_{species}.rds per species in
+      ebirdabund_cache_nsw_buffer/ (every species now shares an identical
+      denominator). Prevents parallel workers competing for files.
    c. EBIRDST RANGES: for each species in the ebirdst 2023 catalogue, downloads
       range .gpkg files (smooth + raw, 27 km + 9 km) to the local ebirdst data
       directory (~11 s/species, ~48 min first run). Skips already-downloaded
@@ -183,11 +187,16 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 ## Possible Improvements (flagged during review)
 
 ### High priority
-- **X-count checklists**: Currently excluded in `clean_ebird()` *after* zero-fill. They should be excluded from the sampling pool *before* zero-fill so all species share the same checklist universe. Otherwise, a species' absence rate is computed against a slightly inflated denominator. Requires re-building the zerofilled cache.
+- **X-count checklists**: ~~Currently excluded in `clean_ebird()` *after* zero-fill.~~ **Done** — the pre-cache step in `run_batch_nsw.R` now captures every checklist with an X count for *any* species (via `read_ebd_observations(..., return_x_count_ids = TRUE)`) and drops them from the shared sampling pool before `zero_fill()`. The IDs are persisted to `ZEROFILL_CACHE/x_count_ids.rds` so `prepare_sampling_master()` and the slow-path `load_ebird()` apply the same filter. `clean_ebird()` retains its `observation_count != "X"` filter as a safety net for code paths that bypass the pre-cache. To apply the fix to a cache built before this change, delete `ZEROFILL_CACHE/zerofilled_*.rds` and `sampling_master.rds` and re-run.
 - **Config file**: `run_batch_nsw.R` still has hard-coded paths at the top (EBD files, cache dirs, output dirs). Extracting these into a `config.R` or YAML would make it easier to point the same script at a different region.
 - **EBD column index brittleness**: ~~Columns 6, 11, 35 are hard-coded.~~ **Done** — `validate_ebd_header()` now checks column names at those positions before any `fread` call.
 
 ### Medium priority
+- **CHMv2 stripe artefacts**: The Meta/WRI CHMv2 raster has visible near-vertical stripes inherited from Sentinel-2 orbit/swath boundaries (different image counts, sun angles, and seasonality between adjacent orbital tracks bake discontinuities into DINOv3's height estimate). Visible in `tree_height_chmv2.png`. Same issue is reported in Moudrý et al. 2024 (Ecosphere) for Lang 2023 and Tolan 2024. Three fix paths, in order of effort:
+    - **(C, easiest, ~10 LOC)** Two-stage aggregation in `load_meta_chmv2` (covariates.R): 38 m → ~250 m **mean** → 1 km **p90**. Current single-step p90 over a 26×26 window preferentially picks the lit side of stripes; an intermediate mean smooths within-stripe before the p90 captures emergent canopy. Also try anisotropic pre-smoothing (`terra::focal()` 1×5 along the stripe direction) and `OVERVIEW_LEVEL=5` (~76 m) which is already averaged from native 1 m.
+    - **(A, medium, ~1 day)** Post-hoc destriping of the cached `meta_chmv2_*.tif` before the p90 step, via combined wavelet–FFT filtering (Münch et al. 2009; reference impl: [DHI-GRAS/rmstripes](https://github.com/DHI-GRAS/rmstripes), Python — call via `reticulate` or port to R with `wavethresh` + `fft`). FFT isolates the periodic vertical-frequency band; wavelet damps only the affected detail bands so real edges are preserved.
+    - **(B, biggest payoff for geographic scaling)** Ensemble with an independent product. Stripes are deterministic in a single product but uncorrelated across products. Median of CHMv2 + ETH-Lang 2020 (Sentinel-2 + GEDI, 10 m, free on GEE / Zenodo) cancels them. Optionally blend in GLAD/Potapov 2021 (30 m, Landsat-based, no S2 stripes) or GEDI L4B (1 km) as a long-wavelength anchor for cells where products disagree by >X m.
+    - Recommended sequencing: do C first (cheap, may be sufficient), then A on the cached raster if stripes persist, then B if also rolling out to other regions.
 - **Generalise `nsw_species_list.R`**: It's NSW-specific (variable names, output file name, plot title). Wrapping it into a function `generate_species_list(region_name, ebd_path, samp_path, ...)` would make it reusable for geographic scaling.
 - **Taxonomy file**: `nsw_ebird_taxonomy.csv` is derived from the NSW EBD. For other regions, this needs to be generated from the regional EBD or replaced with the full eBird taxonomy (available from eBird as `eBird_taxonomy_v*.csv`).
 - **Covariate cache versioning**: The cache key uses `v4` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.

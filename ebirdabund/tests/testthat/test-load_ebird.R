@@ -114,6 +114,36 @@ test_that("clean_ebird allows NA effort_distance_km (stationary counts)", {
   expect_equal(nrow(ebirdabund:::clean_ebird(df)), 1)
 })
 
+test_that("clean_ebird respects custom max_count cap", {
+  base <- list(
+    duration_minutes          = 60,
+    effort_distance_km        = 1,
+    number_observers          = 1,
+    protocol_type             = "Traveling Count",
+    observation_date          = as.Date("2020-06-15"),
+    time_observations_started = "07:00"
+  )
+  df <- data.frame(
+    observation_count = c("50", "150", "300", "1000"),
+    duration_minutes          = rep(60, 4),
+    effort_distance_km        = rep(1, 4),
+    number_observers          = rep(1, 4),
+    protocol_type             = rep("Traveling Count", 4),
+    observation_date          = rep(as.Date("2020-06-15"), 4),
+    time_observations_started = rep("07:00", 4),
+    stringsAsFactors          = FALSE
+  )
+  # Default cap = 200: keep 50 + 150, drop 300 + 1000
+  expect_equal(nrow(ebirdabund:::clean_ebird(df)), 2L)
+  # cap = 500: keep 50, 150, 300, drop 1000
+  expect_equal(nrow(ebirdabund:::clean_ebird(df, max_count = 500L)), 3L)
+  # cap = Inf-ish: keep all
+  expect_equal(
+    nrow(ebirdabund:::clean_ebird(df, max_count = .Machine$integer.max)),
+    4L
+  )
+})
+
 # ── validate_ebd_header ─────────────────────────────────────────────────────
 
 # Build a header line that matches the eBird EBD layout up to col 35 so the
@@ -383,6 +413,42 @@ test_that("read_ebd_observations filters by valid_checklist_ids", {
                                             valid_checklist_ids = "S2")
   expect_equal(out$checklist_id, "S2")
   expect_equal(out$observation_count, "5")
+})
+
+test_that("read_ebd_observations returns X-count IDs across all species", {
+  # Sp A has X on S1; Sp B has X on S3. With species_set = 'Sp A' and
+  # return_x_count_ids = TRUE, BOTH S1 and S3 must come back — the X-count IDs
+  # are captured BEFORE the species filter is applied.
+  tmp <- make_tmp_ebd(list(
+    list(common_name = "Sp A", observation_count = "X", checklist_id = "S1"),
+    list(common_name = "Sp A", observation_count = "3", checklist_id = "S2"),
+    list(common_name = "Sp B", observation_count = "X", checklist_id = "S3"),
+    list(common_name = "Sp B", observation_count = "2", checklist_id = "S4")
+  ))
+  on.exit(unlink(tmp), add = TRUE)
+
+  res <- ebirdabund:::read_ebd_observations(
+    tmp, species_set = "Sp A", return_x_count_ids = TRUE
+  )
+
+  expect_named(res, c("obs", "x_count_ids"))
+  expect_setequal(res$x_count_ids, c("S1", "S3"))
+  # obs is still filtered to Sp A only
+  expect_equal(nrow(res$obs), 2L)
+  expect_true(all(res$obs$common_name == "Sp A"))
+})
+
+test_that("find_x_count_checklists returns unique X-count IDs", {
+  tmp <- make_tmp_ebd(list(
+    list(common_name = "Sp A", observation_count = "X", checklist_id = "S1"),
+    list(common_name = "Sp B", observation_count = "X", checklist_id = "S1"),
+    list(common_name = "Sp A", observation_count = "3", checklist_id = "S2"),
+    list(common_name = "Sp C", observation_count = "X", checklist_id = "S3")
+  ))
+  on.exit(unlink(tmp), add = TRUE)
+
+  ids <- ebirdabund:::find_x_count_checklists(tmp)
+  expect_setequal(ids, c("S1", "S3"))
 })
 
 # ── Real-data smoke test: ACT (smallest state) ──────────────────────────────

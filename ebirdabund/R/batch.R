@@ -385,8 +385,30 @@ estimate_abundance_batch <- function(
   # Workers load the package; support both installed and source-dir dev workflows
   pkg_src <- normalizePath("ebirdabund", mustWork = FALSE)
 
-  cl <- parallel::makeCluster(workers)
-  on.exit(parallel::stopCluster(cl), add = TRUE)
+  # Idle-socket timeout (sec): a worker whose master has gone away will fail its
+  # next recvData() after this many seconds of inactivity and exit on its own.
+  # Long enough to outlast any single species fit, short enough to reap orphans
+  # within an hour if the master dies hard.
+  worker_idle_timeout <- 3600L
+
+  # Force-kill any workers whose stopCluster() did not actually shut them down
+  # (e.g. broken socket, hung GDAL call). pskill() is a no-op for PIDs that have
+  # already exited, so it's safe to call unconditionally.
+  cleanup_cluster <- function(cluster, pids) {
+    tryCatch(parallel::stopCluster(cluster),
+             error = function(e) invisible(NULL))
+    if (length(pids)) {
+      tryCatch(tools::pskill(pids),
+               error = function(e) invisible(NULL))
+    }
+  }
+
+  cl <- parallel::makeCluster(workers, timeout = worker_idle_timeout)
+  worker_pids <- tryCatch(
+    unlist(parallel::clusterEvalQ(cl, Sys.getpid())),
+    error = function(e) integer(0)
+  )
+  on.exit(cleanup_cluster(cl, worker_pids), add = TRUE)
 
   parallel::clusterExport(cl, "pkg_src", envir = environment())
   parallel::clusterEvalQ(cl, {
@@ -429,13 +451,18 @@ estimate_abundance_batch <- function(
       error = function(e) {
         # Worker process died (e.g. SIGPIPE, OOM, GDAL segfault). Rebuild the
         # cluster so subsequent chunks can continue, and treat every species in
-        # this chunk as failed.
+        # this chunk as failed. Force-kill the old workers — stopCluster() over
+        # a broken socket silently leaves their R processes alive otherwise.
         message(sprintf(
           "  [CLUSTER ERROR] chunk failed (%s). Rebuilding cluster and marking %d species as failed.",
           conditionMessage(e), length(chunk)
         ))
-        tryCatch(parallel::stopCluster(cl), error = function(e2) invisible(NULL))
-        cl <<- parallel::makeCluster(workers)
+        cleanup_cluster(cl, worker_pids)
+        cl <<- parallel::makeCluster(workers, timeout = worker_idle_timeout)
+        worker_pids <<- tryCatch(
+          unlist(parallel::clusterEvalQ(cl, Sys.getpid())),
+          error = function(e2) integer(0)
+        )
         parallel::clusterExport(cl, "pkg_src", envir = environment())
         parallel::clusterEvalQ(cl, {
           if (requireNamespace("ebirdabund", quietly = TRUE)) {
