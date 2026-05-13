@@ -63,6 +63,9 @@ polygon    <- sf::st_transform(
 )
 study_bbox <- as.numeric(sf::st_bbox(polygon))
 
+# Export an unbuffered, lat-lon boundary for plotting overlays (used as 'border')
+nsw <- sf::st_transform(region_sf, 4326)
+
 # ── Skip already-completed species ────────────────────────────────────────────
 safe_name_local <- function(x) gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
 
@@ -292,8 +295,7 @@ if (length(species_list) == 0) {
     botw_path    = BOTW_PATH,
     border       = nsw,
     output_dir   = OUTPUT_DIR,
-    log_file     = LOG_FILE,
-    max_count    = 100L
+    log_file     = LOG_FILE
   )
 
   t_total <- proc.time()[["elapsed"]] - t_start
