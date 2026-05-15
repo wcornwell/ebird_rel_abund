@@ -34,6 +34,10 @@
 #' @param output_dir If non-\code{NULL}, each species' abundance map
 #'   (\code{.png}) and prediction raster (\code{.tif}) are saved here using
 #'   the species name as the file stem.
+#' @param commit_sha Optional short git commit hash stamped on every row of
+#'   \code{log_file} so a result can be traced back to the exact source state
+#'   that produced it. Typically captured by the caller via
+#'   \code{git rev-parse --short HEAD}.
 #'
 #' @return A named list with one element per species (in the same order as
 #'   \code{species_list}).  Each element is either the list returned by
@@ -84,7 +88,8 @@ estimate_abundance_batch <- function(
     border           = NULL,
     n_cores          = max(1L, parallel::detectCores() - 1L),
     output_dir       = NULL,
-    log_file         = NULL) {
+    log_file         = NULL,
+    commit_sha       = NA_character_) {
 
   # ── Validation ───────────────────────────────────────────────────────────────
   if (!is.character(species_list) || length(species_list) == 0L) {
@@ -246,17 +251,15 @@ estimate_abundance_batch <- function(
   }
 
   # Format one result as a single-row data.frame for the log.
+  # Column order must match the header in run_batch_nsw.R / LOG_COLS.
   make_log_row <- function(sp, res) {
-    base <- data.frame(
-      common_name      = sp,
-      scientific_name  = unname(sci_lookup[sp]),
-      run_date         = format(Sys.Date(), "%Y-%m-%d"),
-      stringsAsFactors = FALSE
-    )
     if (inherits(res, "error")) {
-      cbind(base, data.frame(
+      data.frame(
+        common_name      = sp,
+        scientific_name  = unname(sci_lookup[sp]),
         status           = "failed",
         exclusion_reason = NA_character_,
+        run_date         = format(Sys.Date(), "%Y-%m-%d"),
         n_checklists     = NA_integer_,
         n_positive       = NA_integer_,
         dev_expl         = NA_real_,
@@ -268,12 +271,16 @@ estimate_abundance_batch <- function(
         range_source     = NA_character_,
         spatial_cv       = NA_real_,
         error_message    = conditionMessage(res),
+        commit_sha       = commit_sha,
         stringsAsFactors = FALSE
-      ))
+      )
     } else {
-      cbind(base, data.frame(
+      data.frame(
+        common_name      = sp,
+        scientific_name  = unname(sci_lookup[sp]),
         status           = if (isTRUE(res$excluded)) "excluded" else "ok",
         exclusion_reason = res$exclusion_reason,
+        run_date         = format(Sys.Date(), "%Y-%m-%d"),
         n_checklists     = res$n_checklists,
         n_positive       = res$n_positive,
         dev_expl         = res$dev_expl,
@@ -285,8 +292,9 @@ estimate_abundance_batch <- function(
         range_source     = res$range_source,
         spatial_cv       = res$spatial_cv,
         error_message    = NA_character_,
+        commit_sha       = commit_sha,
         stringsAsFactors = FALSE
-      ))
+      )
     }
   }
 

@@ -78,9 +78,10 @@ For multiple species use `estimate_abundance_batch()`.
 | Species | Wood Thrush (hard-coded) | Any eBird common name |
 | Study region | BCR 27 (hard-coded) | Any `sf` polygon |
 | Caching | None | Zero-filled data cached as `.rds`; covariate raster cached as GeoTIFF |
-| Mega-flock records | Retained | Checklists with counts > 200 excluded |
+| Effort filter | None mentioned | `duration_minutes` ∈ [10, 300], `effort_distance_km` ≤ 10, `number_observers` ≤ 10 (eBird Best Practices defaults) |
+| Mega-flock records | Retained | Checklists with counts > `max_count` excluded (default 200, parameterised on `clean_ebird()` and `load_ebird()`) |
 
-Zero-fill is performed via `load_ebird.R`, reading the raw EBD with `data.table::fread` and left-joining complete checklists with species detections. Checklists with `observation_count > 200` are excluded: such records typically reflect targeted sampling of a known flock rather than a passive encounter rate, and their inclusion biases abundance estimates upward for gregarious species.
+Zero-fill is performed via `load_ebird.R`, reading the raw EBD with `data.table::fread` and left-joining complete checklists with species detections. Checklists with `observation_count > max_count` are excluded: such records typically reflect targeted sampling of a known flock rather than a passive encounter rate, and their inclusion biases abundance estimates upward for gregarious species. The minimum-duration filter was raised from 5 to 10 minutes following the current eBird Best Practices recommendation; very short checklists tend to under-report species and inflate effort-controlled detection rates.
 
 ### 2. Habitat covariates
 
@@ -92,7 +93,7 @@ Zero-fill is performed via `load_ebird.R`, reading the raw EBD with `data.table:
 | Water | Not included | `water_occ`: JRC Global Surface Water occurrence 0–100 (Pekel et al. 2016, updated 2021), streamed at 30 m via VSICURL |
 | Human footprint | Not included | `pop_density`: log₁₀(persons km⁻² + 1), WorldPop 2020 |
 | Soil | Not included | `clay`: SoilGrids 250 m clay fraction 0–5 cm (ISRIC); NA at water set to 0 |
-| Canopy height | Not included | `tree_height`: OzTreeMap 30 m median canopy height (Pucino et al. 2025, CSIRO); NA where no canopy set to 0 |
+| Canopy height | Not included | `tree_height`: Meta / WRI Canopy Height Maps v2 (DINOv3, 2024 Sentinel-2 imagery), streamed at OVERVIEW_LEVEL=4 (~38 m) and p90-aggregated to the ~1 km master template; pixels >60 m set to NA before aggregation to drop tower/turbine artefacts; NA after aggregation set to 0 |
 | Covariate selection | Manually chosen for Wood Thrush | Automated; columns with < 4 unique values dropped; `lc_shrubs` always excluded |
 | Raster package | `raster` | `terra` |
 

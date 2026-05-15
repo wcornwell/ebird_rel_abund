@@ -42,6 +42,35 @@ REPORTING_RATE_THRESHOLD <- cfg$reporting_rate_threshold
 message(sprintf("Config loaded from: %s", CONFIG_FILE))
 message(sprintf("Region: %s", cfg$region))
 
+# ── Git state: require clean tracked tree, record commit hash ─────────────────
+# Every row in the batch log is tagged with the short SHA of HEAD so a result
+# can be traced to the exact source state that produced it. Untracked files
+# (exploratory scripts, output rasters) are ignored; only modifications to
+# tracked files block the run.
+dirty_files <- tryCatch(
+  system2("git", c("diff", "--name-only", "HEAD"),
+          stdout = TRUE, stderr = FALSE),
+  error = function(e) character(0)
+)
+allow_dirty <- identical(Sys.getenv("EBIRD_ALLOW_DIRTY"), "1")
+if (length(dirty_files) > 0L && !allow_dirty) {
+  stop(
+    "Working tree has uncommitted changes to tracked files — commit them ",
+    "before running the batch so every log row is tied to a reproducible ",
+    "commit.\n",
+    "Override with EBIRD_ALLOW_DIRTY=1 (commit_sha will be tagged '-dirty').\n",
+    "\nModified tracked files:\n  ",
+    paste(dirty_files, collapse = "\n  ")
+  )
+}
+commit_sha <- tryCatch(
+  trimws(system2("git", c("rev-parse", "--short", "HEAD"),
+                 stdout = TRUE, stderr = FALSE)),
+  error = function(e) "unknown"
+)
+if (length(dirty_files) > 0L) commit_sha <- paste0(commit_sha, "-dirty")
+message(sprintf("Git commit: %s", commit_sha))
+
 dir.create(ZEROFILL_CACHE, showWarnings = FALSE, recursive = TRUE)
 
 # ── Species list ──────────────────────────────────────────────────────────────
@@ -73,7 +102,8 @@ safe_name_local <- function(x) gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
 LOG_COLS <- c("common_name", "scientific_name", "status", "exclusion_reason",
               "run_date", "n_checklists", "n_positive", "dev_expl",
               "model_sum", "peak_doy", "peak_time", "max_obs_count",
-              "max_modeled_abd", "range_source", "spatial_cv", "error_message")
+              "max_modeled_abd", "range_source", "spatial_cv", "error_message",
+              "commit_sha")
 if (file.exists(LOG_FILE)) {
   prior_log <- read.csv(LOG_FILE, stringsAsFactors = FALSE)
   for (col in setdiff(LOG_COLS, names(prior_log))) prior_log[[col]] <- NA
@@ -122,7 +152,8 @@ if (length(tif_not_logged) > 0) {
       peak_doy = NA_integer_, peak_time = NA_real_,
       max_obs_count = NA_integer_, max_modeled_abd = NA_real_,
       range_source = NA_character_, spatial_cv = NA_real_,
-      error_message = NA_character_, stringsAsFactors = FALSE
+      error_message = NA_character_, commit_sha = commit_sha,
+      stringsAsFactors = FALSE
     )
   }))
   if (!file.exists(LOG_FILE)) {
@@ -295,7 +326,8 @@ if (length(species_list) == 0) {
     botw_path    = BOTW_PATH,
     border       = nsw,
     output_dir   = OUTPUT_DIR,
-    log_file     = LOG_FILE
+    log_file     = LOG_FILE,
+    commit_sha   = commit_sha
   )
 
   t_total <- proc.time()[["elapsed"]] - t_start

@@ -28,9 +28,10 @@ ebird_rel_abund/
 ├── run_batch_nsw.R          # MAIN PIPELINE — full NSW batch run
 ├── nsw_species_list.R       # Generate nsw_species_list.csv from raw EBD
 ├── rez_abundance.R          # Post-processing: per-REZ abundance stats + plots
+├── build_observer_expertise.R   # Stage 1 — observer-expertise BLUPs (run once)
+├── config.yaml              # Region paths, polygon, thresholds (see CONFIG.md)
 │
 ├── analysis/                # Exploratory, evaluation, and one-off scripts
-│   ├── analysis/build_observer_expertise.R  # Stage 1 calibration — observer expertise BLUPs
 │   ├── test_observer_re.R       # One-species sanity check for the observer term
 │   ├── test_tweedie_vs_nb.R     # CV comparison: Tweedie vs NB family
 │   ├── test_log_transforms.R    # CV comparison: linear vs log-transformed predictors
@@ -42,9 +43,10 @@ ebird_rel_abund/
 │   └── workflow_comparison.md   # Comparison of tutorial vs ebirdabund package
 │
 ├── ebirdabund_cache/        # Auto-generated cache (do not commit)
-│   ├── zerofilled_*.rds     # Per-species zero-filled checklists (~490 files)
-│   ├── cov_stack_v3_*.tif   # Covariate raster stack (bbox + version keyed)
-│   └── gadm/, climate/, elevation/, landuse/, population/  # Downloaded tiles
+│   ├── cov_stack_v5_*.tif   # Covariate raster stack (bbox + version keyed;
+│   │                        #   v5 = Meta CHMv2 replaces OzTreeMap for tree_height)
+│   ├── meta_chmv2_*.tif     # Cached Meta CHMv2 canopy-height raster (one per bbox)
+│   └── gadm/, climate/, elevation/, landuse/, population/, soil/  # Downloaded tiles
 │
 ├── ebirdabund_cache_nsw_buffer/  # Region-specific cache (do not commit)
 │   ├── zerofilled_*.rds         # Per-species, NSW+buffer pool
@@ -70,7 +72,10 @@ ebird_rel_abund/
 │                            #   run_date, n_checklists, n_positive, dev_expl,
 │                            #   model_sum, peak_doy, peak_time, max_obs_count,
 │                            #   max_modeled_abd, range_source, spatial_cv,
-│                            #   error_message
+│                            #   error_message, commit_sha
+│                            # commit_sha is the short git hash of HEAD when the
+│                            # row was written; -dirty suffix means EBIRD_ALLOW_DIRTY=1
+│                            # was used to bypass the clean-tree gate.
 └── botw_species/BOTW_2025.gpkg  # BirdLife range polygons (9.3 GB, not committed)
 ```
 
@@ -106,7 +111,7 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
    → reads NSW sampling + EBD, computes reporting rates
    → writes nsw_species_list.csv  (run once per EBD update)
 
-2. analysis/build_observer_expertise.R  (Stage 1 calibration — run once after pre-cache,
+2. build_observer_expertise.R  (Stage 1 calibration — run once after pre-cache,
    before run_batch_nsw.R; ~overnight on the full buffered region)
    → reads all 5 sampling + EBD files, computes species count per checklist
    → filters to observers with >= 20 complete checklists (drops rare contributors
@@ -119,31 +124,38 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
    so it rebuilds with observer_expertise attached on the next batch run.
 
 3. run_batch_nsw.R  (main run)
-   a. POLYGON: NSW state boundary + 100 km buffer (GDA94/Albers, EPSG:3577)
+   a. GIT GATE: aborts if any tracked file has uncommitted changes (override
+      with EBIRD_ALLOW_DIRTY=1). Captures `git rev-parse --short HEAD` as
+      commit_sha and stamps it on every row of batch_nsw_log.csv so a result
+      can be traced back to the exact source state that produced it.
+   b. POLYGON: NSW state boundary + 100 km buffer (GDA94/Albers, EPSG:3577)
       — includes all of ACT and border regions of VIC/QLD/SA as training data
-   b. PRE-CACHE: reads all 5 state sampling files filtered to buffered bbox,
+   c. PRE-CACHE: reads all 5 state sampling files filtered to buffered bbox,
       then scans all 5 EBD files once. From that scan it (i) collects the
       union of checklist IDs with any X-count entry → x_count_ids.rds,
       (ii) drops those checklists from the shared sampling pool, then
       (iii) writes zerofilled_{species}.rds per species in
       ebirdabund_cache_nsw_buffer/ (every species now shares an identical
       denominator). Prevents parallel workers competing for files.
-   c. EBIRDST RANGES: for each species in the ebirdst 2023 catalogue, downloads
+   d. EBIRDST RANGES: for each species in the ebirdst 2023 catalogue, downloads
       range .gpkg files (smooth + raw, 27 km + 9 km) to the local ebirdst data
       directory (~11 s/species, ~48 min first run). Skips already-downloaded
       species, so subsequent runs complete instantly. Requires EBIRDST_KEY env var
       (set automatically in the script from the stored key).
-   d. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC once →
-      cov_stack_v4_{bbox}.tif in ebirdabund_cache/ (bbox-keyed, shared)
-   e. SAMPLING MASTER: one-time covariate extraction + observer_expertise join
+   e. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC/SoilGrids and stream
+      Meta CHMv2 canopy height once → cov_stack_v5_{bbox}.tif in
+      ebirdabund_cache/ (bbox + version keyed, shared across runs). v5 marks
+      tree_height switching from OzTreeMap to Meta/WRI CHMv2 DINOv3.
+   f. SAMPLING MASTER: one-time covariate extraction + observer_expertise join
       → sampling_master.rds. Built on first call to prepare_sampling_master().
-   f. BATCH: estimate_abundance_batch() — parallel GAM per species
+   g. BATCH: estimate_abundance_batch() — parallel GAM per species
       For each species:
         load_ebird() [uses cache + expertise] → subsample_hex()
         → fit_gam() → predict_abundance() [two resolutions] → save .tif + .png
         Map PNGs include NSW state border overlay for reference.
-   g. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
-   h. LOG: append to batch_nsw_log.csv after each chunk
+   h. STACK: terra::rast() all .tif → nsw_abundance_stack_{res}.tif
+   i. LOG: append to batch_nsw_log.csv after each chunk (every row carries
+      the commit_sha captured in step a).
 
 4. rez_abundance.R  (post-processing, run after batch)
    → loads stack + REZ polygons + zerofilled cache (ebirdabund_cache_nsw_buffer/)
@@ -200,11 +212,11 @@ Effort covariates are log-transformed because they are right-skewed and the log 
 
 eBird checklists are submitted by observers of varying skill. Without controlling for this, per-observer variance leaks into the effort and habitat smooths, biasing predictions toward what frequently-active (often more skilled) observers report. Following **Kelling et al. (2015, *PLoS ONE*)** and **Johnston et al. (2021, *Diversity & Distributions*)**, we partition observer skill out of the per-species models via a two-stage approach.
 
-**Stage 1 — global calibration** (`analysis/build_observer_expertise.R`, run once):
+**Stage 1 — global calibration** (`build_observer_expertise.R`, run once):
 
 1. Read all 5 sampling files (NSW + ACT + VIC + QLD + SA) and clip to the buffered polygon.
 2. Scan all 5 EBD files once and compute `n_species` = number of distinct species reported per complete checklist (all rows, including X-counts — they still indicate detection).
-3. Apply the same effort/time filters as `clean_ebird()` (duration 5–300 min, distance ≤ 10 km, ≤ 10 observers).
+3. Apply the same effort/time filters as `clean_ebird()` (duration 10–300 min, distance ≤ 10 km, ≤ 10 observers).
 4. Drop observers with fewer than 20 qualifying complete checklists (`MIN_CHECKLISTS_PER_OBSERVER`); their BLUPs would be heavily shrunk anyway and the level cardinality makes `bs="re"` expensive.
 5. Apply the same hex × week subsampling used per-species (`spacing_km = 5`).
 6. Fit a single global negative-binomial GAM:
@@ -230,7 +242,7 @@ The fit is expensive — on a single Superb Fairywren species (387k × 13k obser
 
 **If `observer_expertise.rds` is absent**, the pipeline runs as before — no observer term, no expertise join — so Stage 1 is a strict add-on.
 
-**Cache rebuild order after Stage 1:** the sampling master is built once and reused for every species; if it predates Stage 1 it won't carry the expertise column. Delete `ebirdabund_cache_nsw_buffer/sampling_master.rds` after running `analysis/build_observer_expertise.R` so the next batch rebuilds the master with expertise attached.
+**Cache rebuild order after Stage 1:** the sampling master is built once and reused for every species; if it predates Stage 1 it won't carry the expertise column. Delete `ebirdabund_cache_nsw_buffer/sampling_master.rds` after running `build_observer_expertise.R` so the next batch rebuilds the master with expertise attached.
 
 ---
 
@@ -249,13 +261,8 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 
 ## Possible Improvements (flagged during review)
 
-### High priority
-- **X-count checklists**: ~~Currently excluded in `clean_ebird()` *after* zero-fill.~~ **Done** — the pre-cache step in `run_batch_nsw.R` now captures every checklist with an X count for *any* species (via `read_ebd_observations(..., return_x_count_ids = TRUE)`) and drops them from the shared sampling pool before `zero_fill()`. The IDs are persisted to `ZEROFILL_CACHE/x_count_ids.rds` so `prepare_sampling_master()` and the slow-path `load_ebird()` apply the same filter. `clean_ebird()` retains its `observation_count != "X"` filter as a safety net for code paths that bypass the pre-cache. To apply the fix to a cache built before this change, delete `ZEROFILL_CACHE/zerofilled_*.rds` and `sampling_master.rds` and re-run.
-- **Config file**: ~~`run_batch_nsw.R` still has hard-coded paths at the top (EBD files, cache dirs, output dirs).~~ **Done** — `run_batch_nsw.R` now loads all configuration from `config.yaml` via `yaml::read_yaml()`. The config specifies EBD paths, cache dirs, output dirs, study polygon, species list, and thresholds in one place. To switch regions, set `EBIRD_CONFIG=config_yourregion.yaml` and run the same script. Example: `config_example_victoria.yaml` shows how to configure for a different region. See `CONFIG.md` for detailed configuration guide.
-- **EBD column index brittleness**: ~~Columns 6, 11, 35 are hard-coded.~~ **Done** — `validate_ebd_header()` now checks column names at those positions before any `fread` call.
-
 ### Medium priority
-- **Non-species taxa**: The species list includes 4 non-species entries (e.g., "Accipitrine hawk sp. (former Accipiter sp.)", "miner sp.", "cuckoo sp."). These are either (a) unidentified subspecies/hybrids that can't be modeled meaningfully, or (b) eBird's legacy aggregated taxa. Recommendation: filter these out in `nsw_species_list.R` by checking for " sp. " in the common_name and excluding them before modeling. These contribute < 0.1 % reporting rate each so the impact is minimal, but cleanliness matters for scaling to other regions where aggregates may be more common.
+
 - **CHMv2 stripe artefacts**: The Meta/WRI CHMv2 raster has visible near-vertical stripes inherited from Sentinel-2 orbit/swath boundaries (different image counts, sun angles, and seasonality between adjacent orbital tracks bake discontinuities into DINOv3's height estimate). Visible in `tree_height_chmv2.png`. Same issue is reported in Moudrý et al. 2024 (Ecosphere) for Lang 2023 and Tolan 2024. Three fix paths, in order of effort:
     - **(C, easiest, ~10 LOC)** Two-stage aggregation in `load_meta_chmv2` (covariates.R): 38 m → ~250 m **mean** → 1 km **p90**. Current single-step p90 over a 26×26 window preferentially picks the lit side of stripes; an intermediate mean smooths within-stripe before the p90 captures emergent canopy. Also try anisotropic pre-smoothing (`terra::focal()` 1×5 along the stripe direction) and `OVERVIEW_LEVEL=5` (~76 m) which is already averaged from native 1 m.
     - **(A, medium, ~1 day)** Post-hoc destriping of the cached `meta_chmv2_*.tif` before the p90 step, via combined wavelet–FFT filtering (Münch et al. 2009; reference impl: [DHI-GRAS/rmstripes](https://github.com/DHI-GRAS/rmstripes), Python — call via `reticulate` or port to R with `wavethresh` + `fft`). FFT isolates the periodic vertical-frequency band; wavelet damps only the affected detail bands so real edges are preserved.
@@ -263,11 +270,12 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
     - Recommended sequencing: do C first (cheap, may be sufficient), then A on the cached raster if stripes persist, then B if also rolling out to other regions.
 - **Generalise `nsw_species_list.R`**: It's NSW-specific (variable names, output file name, plot title). Wrapping it into a function `generate_species_list(region_name, ebd_path, samp_path, ...)` would make it reusable for geographic scaling.
 - **Taxonomy file**: `nsw_ebird_taxonomy.csv` is derived from the NSW EBD. For other regions, this needs to be generated from the regional EBD or replaced with the full eBird taxonomy (available from eBird as `eBird_taxonomy_v*.csv`).
-- **Covariate cache versioning**: The cache key uses `v4` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
+- **Covariate cache versioning**: The cache key uses `v5` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
 - **REZ script parameterisation**: `rez_abundance.R` paths and the `TOP_N = 50` cutoff are hard-coded. Making it accept command-line arguments would make it easier to run for new regions or different analysis polygons.
 - **Parallel memory**: `n_cores = detectCores() - 1` doesn't account for terra's per-worker memory usage. For larger regions (more grid cells, higher resolution), this may OOM. Consider a `max_ram_gb` guard that caps workers.
 
 ### Lower priority
+
 - **Incremental stack building**: The stack-building step at the end of `run_batch_nsw.R` re-reads all TIFs. For very large species lists, this is slow. Could build incrementally or defer to a separate script.
 - **Smooth plotting**: `plot_gam_smooths()` in `utils.R` saves a static PNG. Interactive HTML (e.g. via `plotly`) would make diagnosing smooth shapes much faster.
 
@@ -282,11 +290,11 @@ The package (`ebirdabund/`) is region-agnostic — `fit_species_model()` and `es
 The work needed to add a new region:
 
 1. Download regional EBD + sampling files.
-2. Run `generate_species_list()` (once generalised) for the new region.
+2. Run a per-region adaptation of `nsw_species_list.R` (still needs generalising — see Improvements).
 3. Generate a taxonomy CSV for the region (or use the full eBird taxonomy).
-4. Create a `run_batch_{region}.R` pointing at the new files — or, better, a single `run_batch.R` that reads a config file.
+4. Copy `config.yaml` to `config_{region}.yaml`, edit paths/polygon/species-list, and run `EBIRD_CONFIG=config_{region}.yaml Rscript run_batch_nsw.R`. `config_example_victoria.yaml` is a worked example; `CONFIG.md` documents every key.
 5. The covariate downloads (ESA, WorldClim, etc.) are global and will re-use cached tiles if the bounding box overlaps.
-6. Range masking is already global: BOTW covers all species, and ebirdst covers whichever species it models. Run the ebirdst pre-download step for the new species list before the batch — the download key (`EBIRDST_KEY`) is already set in `run_batch_nsw.R`.
-7. Use a separate `ZEROFILL_CACHE` directory for each region's zerofilled data (the cache is keyed only by species name, not by polygon).
+6. Range masking is already global: BOTW covers all species, and ebirdst covers whichever species it models. The pre-download step in `run_batch_nsw.R` runs automatically for the new species list before the batch — `EBIRDST_KEY` is set in the script.
+7. Use a separate `zerofill_cache` directory per region in the config (the cache is keyed only by species name, not by polygon, so different regions' caches must not share a directory).
 
 The main bottleneck for larger regions will be RAM and disk: the zerofilled cache scales linearly with species count × checklist count.
