@@ -50,6 +50,14 @@ grid_resolutions_km:
 # Species reporting rate threshold (keep only species >= this fraction)
 reporting_rate_threshold: 0.005
 
+# Parallel workers for the per-species batch (estimate_abundance_batch n_cores).
+# Each worker holds the sampling master, the active species' zerofill, and an
+# mgcv::bam state in memory — peak RSS can reach ~1.5 GB/worker. Setting this
+# below detectCores() leaves headroom for macOS memory compression; a value of
+# 6 was chosen after a 9-worker run hit jetsam-level pressure and lost two
+# chunks to "error reading from connection" worker deaths.
+n_cores: 6
+
 # Study polygon parameters
 study_polygon:
   country: AUS

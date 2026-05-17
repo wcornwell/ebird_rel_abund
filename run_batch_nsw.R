@@ -39,6 +39,14 @@ PROJ_OUTPUT        <- cfg$study_polygon$proj_output
 # Species filtering threshold
 REPORTING_RATE_THRESHOLD <- cfg$reporting_rate_threshold
 
+# Parallel workers for the per-species batch. Falls back to detectCores()-1
+# if unset for backward compatibility with older configs.
+N_CORES <- if (!is.null(cfg$n_cores)) {
+  as.integer(cfg$n_cores)
+} else {
+  max(1L, parallel::detectCores() - 1L)
+}
+
 message(sprintf("Config loaded from: %s", CONFIG_FILE))
 message(sprintf("Region: %s", cfg$region))
 
@@ -327,6 +335,7 @@ if (length(species_list) == 0) {
     border       = nsw,
     output_dir   = OUTPUT_DIR,
     log_file     = LOG_FILE,
+    n_cores      = N_CORES,
     commit_sha   = commit_sha
   )
 

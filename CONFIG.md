@@ -41,6 +41,7 @@ Each YAML file specifies:
 | `botw_path` | BirdLife range polygons (global) | `botw_species/BOTW_2025.gpkg` |
 | `grid_resolutions_km` | Prediction grid resolutions | `[3, 9]` |
 | `reporting_rate_threshold` | Species inclusion threshold | `0.005` |
+| `n_cores` | Parallel workers for the species batch (optional; defaults to `detectCores() - 1` if omitted). Each worker peaks at ~1.5 GB RSS — pick a value that leaves headroom on your machine. | `6` |
 | `study_polygon` | Region boundary and buffer settings | See below |
 
 ### Study Polygon

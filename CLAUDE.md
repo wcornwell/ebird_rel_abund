@@ -200,7 +200,7 @@ Effort covariates are log-transformed because they are right-skewed and the log 
 
 **Fitting**: `mgcv::bam()` with `fREML`, `discrete=TRUE`, `gamma=1.4`, `select=TRUE`. Falls back to `select=FALSE` then `discrete=FALSE` on convergence failure.
 
-**Prediction**: Standardised effort (60 min, 1 km, 1 observer, Traveling Count) at the circular mean DOY and time of detection checklists. Abundance is capped at the 90th percentile of non-zero training counts (log scale) to prevent extrapolation overflow.
+**Prediction**: Standardised effort (60 min, 1 km, 1 observer, Traveling Count) at the **model-based peak DOY and time-of-day** for the species — i.e. the conditions under which detection is highest, following the Cornell eBird Best Practices approach. Peak DOY is the argmax of the link-scale **lower 95% CI** (`fit - 1.96 * se`) from a daily sweep over `1:365` at mean habitat and standard effort; peak time is then the argmax of the same lower-CI sweep over `seq(0, 24, length.out = 300)` at the chosen peak DOY. Using the lower CI rather than the mean keeps the peak inside the well-supported region of the smooth — without it, sparsely-sampled times (e.g. pre-dawn) can win the argmax on point estimate alone. Predictions therefore represent "expected count in a 1-hour, 1-km, single-observer Traveling Count at the species' peak season and time of day", which is systematically higher than an annual/diurnal average. When the model includes the observer-expertise smooth, prediction is at the **median** training-data expertise (population-average observer), not the top of the distribution. Abundance is capped at the 90th percentile of non-zero training counts (on the log scale, before exponentiation) to prevent extrapolation overflow.
 
 **Exclusion criteria**: fewer than 50 positive checklists after hex subsampling, or model sum ≤ 1e-5 across the polygon.
 
@@ -272,7 +272,7 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 - **Taxonomy file**: `nsw_ebird_taxonomy.csv` is derived from the NSW EBD. For other regions, this needs to be generated from the regional EBD or replaced with the full eBird taxonomy (available from eBird as `eBird_taxonomy_v*.csv`).
 - **Covariate cache versioning**: The cache key uses `v5` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
 - **REZ script parameterisation**: `rez_abundance.R` paths and the `TOP_N = 50` cutoff are hard-coded. Making it accept command-line arguments would make it easier to run for new regions or different analysis polygons.
-- **Parallel memory**: `n_cores = detectCores() - 1` doesn't account for terra's per-worker memory usage. For larger regions (more grid cells, higher resolution), this may OOM. Consider a `max_ram_gb` guard that caps workers.
+- **Parallel memory**: `n_cores` is now read from `config.yaml` (default `6`). Each worker peaks at ~1.5 GB RSS (sampling master + zerofill + mgcv::bam state), so 9 workers on a 16-core Mac M-series ran the system to jetsam-level memory pressure and lost two chunks to silent worker deaths surfacing as `"error reading from connection"`. Six leaves headroom for the macOS memory compressor; bump up if you have ≥ 64 GB RAM and a smaller region. For larger regions (more grid cells, higher resolution), consider a `max_ram_gb` guard that caps workers from total RAM.
 
 ### Lower priority
 

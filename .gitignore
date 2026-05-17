@@ -36,7 +36,9 @@ nsw_species_rarity_cutoff.png
 # =============================================================================
 *.log
 *_log.csv
+*_log.txt
 *.rds
+*.bak
 
 # =============================================================================
 # Screenshots and ad-hoc images
@@ -58,6 +60,16 @@ slyre_nsw.png
 sparrot_nsw.png
 wtnt_nsw.png
 "Superb Fairywren_nsw.png"
+
+# Ad-hoc plot/raster outputs from analysis/ scripts (the .R sources are tracked)
+analysis/*.png
+analysis/*.tif
+
+# Root-level exploratory plots
+clay_map.png
+expertise_vs_checklists.png
+observer_expertise_histogram.png
+tree_height_chmv2.png
 
 # =============================================================================
 # Claude internals
