@@ -229,8 +229,19 @@ estimate_abundance_batch <- function(
       }, error = function(e) NA_real_)
     }
 
-    list(n_checklists     = nrow(model_fit$data),
-         n_positive       = sum(model_fit$data$observation_count > 0L),
+    # Pull out scalar summaries, then release the big fit + raster objects
+    # and force a generational GC before returning. Without this the worker
+    # retains the bam fit (often 200-500 MB) on its heap; over a long batch
+    # the inactive heap grows, macOS compresses it, and we drift toward
+    # jetsam pressure.
+    n_check <- nrow(model_fit$data)
+    n_pos   <- sum(model_fit$data$observation_count > 0L)
+    rm(model_fit)
+    if (exists("pred", inherits = FALSE)) rm(pred)
+    gc(full = TRUE)
+
+    list(n_checklists     = n_check,
+         n_positive       = n_pos,
          dev_expl         = dev_expl,
          model_sum        = model_sum,
          peak_doy         = cached_peak_doy,
@@ -427,6 +438,14 @@ estimate_abundance_batch <- function(
     } else {
       stop("Cannot load ebirdabund on worker: install it or run from the package source directory.")
     }
+    # Cap terra's per-worker raster cache. The default (~60% of system RAM)
+    # is per-process, so N workers would each independently claim that much,
+    # quietly pushing the macOS memory compressor toward jetsam pressure
+    # over long runs. 5% is plenty for our read-extract-predict-write
+    # pattern, which has low raster-cache reuse anyway.
+    if (requireNamespace("terra", quietly = TRUE)) {
+      terra::terraOptions(memfrac = 0.05, progress = 0)
+    }
   })
 
   parallel::clusterExport(
@@ -453,7 +472,35 @@ estimate_abundance_batch <- function(
         chunk,
         function(sp) {
           cov <- if (!is.null(wrapped_cov)) terra::unwrap(wrapped_cov) else NULL
-          tryCatch(run_species(sp, cov), error = function(e) e)
+          # Mirror run_one()'s typed dispatch: ebirdabund_excluded conditions
+          # become excluded-result lists (so they log as status="excluded"),
+          # generic errors are propagated as error objects. Workers cannot
+          # message() back to the master, so the per-species exclusion line
+          # that run_one prints is intentionally omitted here.
+          res <- tryCatch(
+            run_species(sp, cov),
+            ebirdabund_excluded = function(e) {
+              list(excluded         = TRUE,
+                   exclusion_reason = e$exclusion_reason,
+                   n_checklists     = e$n_checklists,
+                   n_positive       = e$n_positive,
+                   dev_expl         = NA_real_,
+                   model_sum        = NA_real_,
+                   peak_doy         = NA_integer_,
+                   peak_time        = NA_real_,
+                   max_obs_count    = NA_integer_,
+                   max_modeled_abd  = NA_real_,
+                   range_source     = NA_character_,
+                   spatial_cv       = NA_real_)
+            },
+            error = function(e) e
+          )
+          # Belt-and-braces cleanup: drop the per-task covariate handle and
+          # run a generational GC before this worker picks up its next
+          # species. run_species() does its own rm + gc internally, but
+          # this catches anything that leaked through the error path.
+          rm(cov); gc(full = TRUE)
+          res
         }
       ),
       error = function(e) {
@@ -477,6 +524,9 @@ estimate_abundance_batch <- function(
             library(ebirdabund)
           } else if (dir.exists(pkg_src)) {
             devtools::load_all(pkg_src, quiet = TRUE)
+          }
+          if (requireNamespace("terra", quietly = TRUE)) {
+            terra::terraOptions(memfrac = 0.05, progress = 0)
           }
         })
         parallel::clusterExport(

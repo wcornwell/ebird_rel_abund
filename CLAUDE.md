@@ -272,7 +272,12 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 - **Taxonomy file**: `nsw_ebird_taxonomy.csv` is derived from the NSW EBD. For other regions, this needs to be generated from the regional EBD or replaced with the full eBird taxonomy (available from eBird as `eBird_taxonomy_v*.csv`).
 - **Covariate cache versioning**: The cache key uses `v5` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
 - **REZ script parameterisation**: `rez_abundance.R` paths and the `TOP_N = 50` cutoff are hard-coded. Making it accept command-line arguments would make it easier to run for new regions or different analysis polygons.
-- **Parallel memory**: `n_cores` is now read from `config.yaml` (default `6`). Each worker peaks at ~1.5 GB RSS (sampling master + zerofill + mgcv::bam state), so 9 workers on a 16-core Mac M-series ran the system to jetsam-level memory pressure and lost two chunks to silent worker deaths surfacing as `"error reading from connection"`. Six leaves headroom for the macOS memory compressor; bump up if you have ≥ 64 GB RAM and a smaller region. For larger regions (more grid cells, higher resolution), consider a `max_ram_gb` guard that caps workers from total RAM.
+- **Parallel memory**: `n_cores` is read from `config.yaml` (default `6`). Each worker peaks at ~2 GB RSS (sampling master + zerofill + mgcv::bam state). Three mitigations are now built into `estimate_abundance_batch()`:
+    - `terra::terraOptions(memfrac = 0.05)` is set on every worker, so the per-process terra raster cache is capped at ~5% of system RAM. The default of ~60% is per-process and so would, with N workers, claim N×60% — slow drift to jetsam pressure on long runs.
+    - `run_species()` does `rm(model_fit, pred); gc(full = TRUE)` immediately before returning, so the bam fit (often 200–500 MB) is released and a generational GC runs before the worker picks up its next species.
+    - The worker lambda in the `parLapplyLB` call does the same after `run_species` returns, catching anything that leaked via the error path.
+    
+    Originally 9 workers on a 32 GB M-series Mac drove the macOS compressor past 13 GB twice in a 4 h 42 m run, killing two chunks with silent worker deaths surfacing as `"error reading from connection"`. Six workers + the cleanup above ran the same workload at pressure level 1 (Normal). For larger regions or higher resolutions consider a `max_ram_gb` guard that caps workers from total RAM, or periodic worker recycling (rebuild the cluster every N species) to fully reset the malloc heap.
 
 ### Lower priority
 
