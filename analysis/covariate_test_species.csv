@@ -1,0 +1,20 @@
+common_name,scientific_name,guild,reporting_rate,notes
+Superb Lyrebird,Menura novaehollandiae,dense_forest,3.36,wet-sclerophyll & rainforest specialist; sensitive to canopy cover
+Eastern Whipbird,Psophodes olivaceus,dense_forest,16.77,dense understorey; coastal/escarpment forest
+Rose Robin,Petroica rosea,dense_forest,1.52,wet forest; lower reporting rate stress-tests subsample threshold
+Superb Fairywren,Malurus cyaneus,open_woodland,32.07,canonical sanity-check species; very high N
+Eastern Yellow Robin,Eopsaltria australis,open_woodland,16.95,broad woodland generalist
+Gray Shrikethrush,Colluricincla harmonica,open_woodland,14.21,widespread woodland
+Australian Magpie,Gymnorhina tibicen,open_country,49.37,grassland-edge generalist; highest reporting rate in NSW
+Brown Songlark,Cincloramphus cruralis,open_country,0.56,inland grassland; tests low-density species behaviour
+Stubble Quail,Coturnix pectoralis,open_country,0.45,cropland/grassland; cryptic detection
+Pacific Black Duck,Anas superciliosa,water,22.75,freshwater wetlands; canopy-height irrelevance check
+Royal Spoonbill,Platalea regia,water,5.50,coastal/inland wetlands
+Noisy Miner,Manorina melanocephala,urban,33.20,urban/edge habitat; benefits from cleared land
+Rainbow Lorikeet,Trichoglossus moluccanus,urban,36.66,urban-adapted; high reporting rate
+Crested Pigeon,Ocyphaps lophotes,arid_inland,21.51,semi-arid woodland; broad inland distribution
+White-plumed Honeyeater,Ptilotula penicillata,arid_inland,8.03,riparian/inland woodland
+Flame Robin,Petroica phoenicea,alpine,0.46,alpine/sub-alpine in summer; tests altitudinal specialists
+Welcome Swallow,Hirundo neoxena,low_dev_expl_aerial,32.56,aerial insectivore; dev_expl 0.15 — tests whether new covariates help where habitat is barely predictive
+Brown Goshawk,Tachyspiza fasciata,low_dev_expl_raptor,2.30,wide-ranging raptor; dev_expl 0.16 — mobile predators are a known weak spot
+Tawny Frogmouth,Podargus strigoides,low_dev_expl_nocturnal,2.19,nocturnal forest species; dev_expl 0.20 — detection bias not captured by effort smooths

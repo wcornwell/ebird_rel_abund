@@ -259,6 +259,39 @@ Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearso
 
 ---
 
+## Covariate Variant Testing
+
+For evaluating a candidate covariate change — swapping one layer for another (e.g. CHMv2 → ETH-Lang for `tree_height`) or adding a new layer — without invalidating the main cache. Implemented in `ebirdabund/R/test_covariate.R` (`test_covariate_variant()`). Builds on `evaluate_model_cv()` / `compare_covariate_models()`; does not replace them.
+
+**Design constraints:**
+- Reuses `sampling_master.rds` and `zerofilled_*.rds` as-is — never rewrites them. The variant column is joined in-memory at the start of each test run.
+- Variant covariate values are extracted once from the alternative raster (or extraction function) and cached separately at `ebirdabund_cache_nsw_buffer/variant_extracts/{variant_name}.rds`, keyed by checklist ID. Repeat tests are instant.
+- Paired k-fold CV per species: identical fold assignments for baseline and variant (`evaluate_model_cv()` takes an optional `fold_ids` argument for this) → matched-pair comparison with much higher statistical power than independent CVs.
+
+**API:**
+
+```r
+test_covariate_variant(
+  variant_name   = "tree_height_eth_lang",
+  variant_source = "path/to/eth_global_2020.tif",   # or function(bbox, template) -> SpatRaster
+  change         = list(swap = "tree_height"),       # or list(add = "tree_height_eth")
+  species        = NULL,                              # default: test set CSV
+  k              = 5
+)
+```
+
+**Test species set** lives at `analysis/covariate_test_species.csv` — a fixed list hand-picked to span habitat guilds (forest, open-country, water, urban, arid, alpine). Same set on every variant test so deltas are directly comparable across variants over time. Sized to complete in ~10–20 min.
+
+**Outputs** under `covariate_tests/{variant_name}/`:
+- `per_species_metrics.csv` — species × {baseline, variant, Δ} for Spearman ρ, Pearson r, MAE, RMSE, holdout deviance explained.
+- `summary.txt` — paired Wilcoxon across species, win/tie/loss counts per metric.
+- `smooth_comparison.pdf` — baseline vs variant partial-effect plot per species for the swapped/added covariate.
+- `metrics_full.rds` — raw CV objects + full-data fits for re-analysis.
+
+First concrete use: `analysis/tree_height/test_tree_height_alternatives.R` runs the CHMv2 two-stage aggregation variant and a GLAD/Potapov 2019 variant against the current CHMv2 baseline, then merges per-species deltas into a three-way comparison CSV.
+
+---
+
 ## Possible Improvements (flagged during review)
 
 ### Medium priority

@@ -11,6 +11,11 @@
 #'   [build_gam_formula()] (identical to [fit_gam()]).
 #' @param k Number of CV folds.  Default `5`.
 #' @param seed Random seed for reproducible fold assignment.  Default `42`.
+#'   Ignored when `fold_ids` is supplied.
+#' @param fold_ids Optional integer vector of length `nrow(df)` assigning each
+#'   row to a fold (values in `1..k`). When supplied, `seed` and the internal
+#'   random assignment are skipped — enabling paired CV across two formulas on
+#'   the same data (e.g. baseline vs. covariate variant).
 #'
 #' @return A list with:
 #' \describe{
@@ -31,7 +36,8 @@
 #' }
 #'
 #' @export
-evaluate_model_cv <- function(df, formula = NULL, k = 5L, seed = 42L) {
+evaluate_model_cv <- function(df, formula = NULL, k = 5L, seed = 42L,
+                              fold_ids = NULL) {
   k <- as.integer(k)
   if (k < 2L || k > nrow(df))
     stop("`k` must be between 2 and nrow(df).")
@@ -46,8 +52,16 @@ evaluate_model_cv <- function(df, formula = NULL, k = 5L, seed = 42L) {
     formula <- build_gam_formula(df, hab_cols)
   }
 
-  set.seed(seed)
-  fold_id <- sample(rep_len(seq_len(k), nrow(df)))
+  if (is.null(fold_ids)) {
+    set.seed(seed)
+    fold_id <- sample(rep_len(seq_len(k), nrow(df)))
+  } else {
+    if (length(fold_ids) != nrow(df))
+      stop("`fold_ids` must have length nrow(df).")
+    if (!all(fold_ids %in% seq_len(k)))
+      stop("`fold_ids` values must be integers in 1..k.")
+    fold_id <- as.integer(fold_ids)
+  }
 
   # Protocol reference level
   protocols <- levels(df$protocol_type)
