@@ -84,16 +84,29 @@ for (i in seq_len(nrow(rez))) {
 
   cropped <- crop(stack, rez_vect)
   masked  <- mask(cropped, rez_vect)
-  means   <- global(masked, fun = "mean", na.rm = TRUE)[[1]]
+
+  # Cells inside the REZ polygon, regardless of per-species range NA.
+  # Treat range-masked NAs as zero abundance: a species absent from part of
+  # the REZ should pull the REZ mean down, not be excluded from the average.
+  inside_r  <- mask(crop(setValues(stack[[1]], 1), rez_vect), rez_vect)
+  n_inside  <- as.numeric(global(inside_r, fun = "sum", na.rm = TRUE)[[1]])
+
+  sums  <- global(masked, fun = "sum", na.rm = TRUE)[[1]]
+  means <- sums / n_inside
   names(means) <- names(stack)
 
+  # Variance with NA-as-zero: E[x^2] - (E[x])^2 over all REZ cells
+  sq_sums <- global(masked^2, fun = "sum", na.rm = TRUE)[[1]]
+  sds     <- sqrt(pmax(sq_sums / n_inside - means^2, 0))
+  names(sds) <- names(stack)
+
+  # model_se is kept as mean over cells where the species was predicted —
+  # it represents model uncertainty in the species' realised range, not in
+  # cells that were range-masked to zero.
   se_cropped <- crop(se_stack, rez_vect)
   se_masked  <- mask(se_cropped, rez_vect)
   mean_se    <- global(se_masked, fun = "mean", na.rm = TRUE)[[1]]
   names(mean_se) <- names(stack)
-
-  sds <- global(masked, fun = "sd", na.rm = TRUE)[[1]]
-  names(sds) <- names(stack)
 
   top_idx <- order(means, decreasing = TRUE)[
     seq_len(min(TOP_N, sum(!is.na(means))))
