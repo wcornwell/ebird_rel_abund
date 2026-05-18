@@ -23,6 +23,7 @@ ebirdabund_cache_*/
 # =============================================================================
 species_maps*/
 rez_plots/
+covariate_tests/
 batch_nsw_log.csv
 
 # =============================================================================
@@ -61,9 +62,10 @@ sparrot_nsw.png
 wtnt_nsw.png
 "Superb Fairywren_nsw.png"
 
-# Ad-hoc plot/raster outputs from analysis/ scripts (the .R sources are tracked)
-analysis/*.png
-analysis/*.tif
+# Ad-hoc plot/raster outputs from analysis/ scripts (the .R sources are tracked).
+# Recursive so per-topic subdirectories (analysis/tree_height/ etc.) are covered.
+analysis/**/*.png
+analysis/**/*.tif
 
 # Root-level exploratory plots
 clay_map.png
