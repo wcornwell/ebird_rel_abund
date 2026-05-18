@@ -32,15 +32,15 @@ ebird_rel_abund/
 ├── config.yaml              # Region paths, polygon, thresholds (see CONFIG.md)
 │
 ├── analysis/                # Exploratory, evaluation, and one-off scripts
-│   ├── test_observer_re.R       # One-species sanity check for the observer term
-│   ├── test_tweedie_vs_nb.R     # CV comparison: Tweedie vs NB family
-│   ├── test_log_transforms.R    # CV comparison: linear vs log-transformed predictors
-│   ├── test_pop_density.R       # F-stat analysis of pop_density across 40 species
-│   ├── test_count_filter.R      # Visual check of smooths/predictions for 4 species
-│   ├── test_nsw_buffer.R        # Integration test for multi-state buffered run
-│   ├── test_nsw.R               # Original single-state test (reference only)
-│   ├── 06_abundance.Rmd         # Cornell eBird Best Practices tutorial (reference)
-│   └── workflow_comparison.md   # Comparison of tutorial vs ebirdabund package
+│   ├── reference/                     # External reference material
+│   │   ├── 06_abundance.Rmd           # Cornell eBird Best Practices tutorial
+│   │   └── workflow_comparison.md     # Comparison of tutorial vs ebirdabund package
+│   ├── tree_height/                   # Canopy-height layer investigations (CHMv2, ETH-Lang, GLAD)
+│   ├── palsar/                        # PALSAR backscatter as a candidate covariate
+│   ├── observer/                      # One-species sanity check for the observer term
+│   ├── count/                         # Visual checks / threshold tuning for observation counts
+│   ├── modeling/                      # Family + transform comparisons (NB vs Tweedie, log vs linear, pop_density F-stats)
+│   └── integration/                   # Multi-state buffered run + cross-region plot comparisons
 │
 ├── ebirdabund_cache/        # Auto-generated cache (do not commit)
 │   ├── cov_stack_v5_*.tif   # Covariate raster stack (bbox + version keyed;
@@ -52,7 +52,7 @@ ebird_rel_abund/
 │   ├── zerofilled_*.rds         # Per-species, NSW+buffer pool
 │   ├── sampling_master.rds      # Shared sampling pool + covariates + expertise
 │   ├── x_count_ids.rds          # Checklists with any X-count entry
-│   └── observer_expertise.rds   # Stage 1 BLUPs (run analysis/build_observer_expertise.R)
+│   └── observer_expertise.rds   # Stage 1 BLUPs (run build_observer_expertise.R)
 │
 ├── species_maps/            # Per-species output (do not commit)
 │   ├── 3km/*.tif            # abd + abd_se layers at 3 km
@@ -173,7 +173,7 @@ To re-run from scratch: delete `species_maps/`, `ebirdabund_cache_nsw_buffer/`, 
 
 ## Key Modelling Decisions
 
-**GAM family**: Negative binomial (`mgcv::nb()`), chosen a priori via `test_tweedie_vs_nb.R`.
+**GAM family**: Negative binomial (`mgcv::nb()`), chosen a priori via `analysis/modeling/test_tweedie_vs_nb.R`.
 
 **Effort covariates** (control for observation bias):
 - `day_of_year` — cyclic cubic spline, k=10, knots c(0, 365)
@@ -238,7 +238,7 @@ The fit is expensive — on a single Superb Fairywren species (387k × 13k obser
 
 `attach_observer_expertise()` in `load_ebird.R` joins the score onto each species' training data via `observer_id`. Observers not in the calibration set (rare contributors, or first-time appearances) are assigned the median expertise so they contribute at the population-average level. `observer_id` is dropped after the join. `build_gam_formula()` then adds `s(observer_expertise, k=5)` to the per-species formula. `predict_abundance()` sets `observer_expertise` to the median across training data so the standardised-effort prediction is for an average-skill observer (cf. eBird Status & Trends, which predicts at the *top* of the skill distribution — an "expert eBirder").
 
-**One-species sanity check before Stage 1 was operationalised** (`analysis/test_observer_re.R`): for Superb Fairywren, adding `s(observer_id, bs="re")` directly to the per-species formula dropped the per-cell mean predicted abundance from 1.262 to 0.898 (ratio 0.71). That is, ~30 % of the "high numbers" feeling was observer-skill variance bleeding into the other smooths. The expertise-score approach in Stage 1 + Stage 2 is the citable, scalable form of the same correction.
+**One-species sanity check before Stage 1 was operationalised** (`analysis/observer/test_observer_re.R`): for Superb Fairywren, adding `s(observer_id, bs="re")` directly to the per-species formula dropped the per-cell mean predicted abundance from 1.262 to 0.898 (ratio 0.71). That is, ~30 % of the "high numbers" feeling was observer-skill variance bleeding into the other smooths. The expertise-score approach in Stage 1 + Stage 2 is the citable, scalable form of the same correction.
 
 **If `observer_expertise.rds` is absent**, the pipeline runs as before — no observer term, no expertise join — so Stage 1 is a strict add-on.
 
@@ -248,7 +248,7 @@ The fit is expensive — on a single Superb Fairywren species (387k × 13k obser
 
 ## Evaluation
 
-Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearson r, RMSE, holdout deviance explained). The evaluation scripts follow the pattern in `test_tweedie_vs_nb.R`:
+Use `evaluate_model_cv(fit$data, k=5)` for held-out metrics (Spearman ρ, Pearson r, RMSE, holdout deviance explained). The evaluation scripts follow the pattern in `analysis/modeling/test_tweedie_vs_nb.R`:
 
 1. Call `fit_species_model()` to get the subsampled data frame.
 2. Build alternative formulas manually if testing a variant.
