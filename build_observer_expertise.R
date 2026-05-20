@@ -108,7 +108,7 @@ message(sprintf("  n_species per checklist: mean=%.2f, median=%d, max=%d, %%zero
 n_before <- nrow(samp)
 samp <- samp |>
   dplyr::filter(
-    duration_minutes >= 5,
+    duration_minutes >= 10,
     duration_minutes <= 300,
     is.na(effort_distance_km) | effort_distance_km <= 10,
     number_observers <= 10,
