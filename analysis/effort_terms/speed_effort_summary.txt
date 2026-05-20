@@ -1,0 +1,13 @@
+Effort-term test: baseline + s(log1p(speed_kph), k = 4)
+Species evaluated: 19   (excluded: 0)
+
+
+Total wall time: 50.3 min
+
+Per-metric summary (variant - baseline, in the better direction):
+  metric              mean_delta  median_dlt    wilcox_p    win    tie   loss
+  spearman_r              0.0006      0.0003      0.0002     17      0      2
+  pearson_r               0.0001      0.0004      0.1524     12      0      7
+  mae                    -0.0012     -0.0005      0.0141     12      0      7
+  rmse                   -0.0029     -0.0000      0.1524     10      0      9
+  holdout_dev_expl        0.0007      0.0007      0.0018     16      0      3
