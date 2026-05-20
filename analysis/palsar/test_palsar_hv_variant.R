@@ -21,8 +21,6 @@ suppressPackageStartupMessages({
   library(geodata)
 })
 
-source("analysis/palsar/palsar_helpers.R")
-
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 # ── Config + polygon (same as run_batch_nsw.R) ──────────────────────────────
@@ -50,7 +48,7 @@ cov_stack <- prepare_covariates(polygon, cache_dir = CACHE)
 # in EPSG:4326 and the existing cov_stack as template.
 palsar_hv_source <- function(bbox, template) {
   ext_buf <- terra::ext(bbox[1], bbox[3], bbox[2], bbox[4])
-  r <- load_palsar_hv(
+  r <- ebirdabund:::load_palsar_hv(
     bb        = bbox,
     ext       = ext_buf,
     template  = template[[1]],

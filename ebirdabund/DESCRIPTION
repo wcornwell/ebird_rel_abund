@@ -16,6 +16,7 @@ Imports:
     dplyr,
     geodata,
     ggplot2,
+    jsonlite,
     lubridate,
     mgcv,
     parallel,

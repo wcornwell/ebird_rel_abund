@@ -43,10 +43,12 @@ ebird_rel_abund/
 │   └── integration/                   # Multi-state buffered run + cross-region plot comparisons
 │
 ├── ebirdabund_cache/        # Auto-generated cache (do not commit)
-│   ├── cov_stack_v6_*.tif   # Covariate raster stack (bbox + version keyed;
+│   ├── cov_stack_v7_*.tif   # Covariate raster stack (bbox + version keyed;
 │   │                        #   v5 = Meta CHMv2 replaces OzTreeMap for tree_height;
-│   │                        #   v6 = adds nightlights (Falchi/Cinzano 2015))
+│   │                        #   v6 = adds nightlights (Falchi/Cinzano 2015);
+│   │                        #   v7 = adds palsar_hv (ALOS-2 PALSAR-2 HV gamma0))
 │   ├── meta_chmv2_*.tif     # Cached Meta CHMv2 canopy-height raster (one per bbox)
+│   ├── palsar_hv_*.tif      # Cached PALSAR HV gamma0 dB raster (one per year + bbox)
 │   ├── nightlights/         # Falchi/Cinzano World Atlas 2015 GeoTIFF (local input)
 │   └── gadm/, climate/, elevation/, landuse/, population/, soil/  # Downloaded tiles
 │
@@ -198,6 +200,7 @@ To re-run from scratch: delete `species_maps/`, `ebirdabund_cache_nsw_buffer/`, 
 - `clay` — k=4 (SoilGrids 0–5 cm clay fraction; NA at ocean/water set to 0)
 - `log1p(nightlights)` — k=4 (Falchi/Cinzano World Atlas of Artificial Night Sky Brightness 2015, ~1 km global GeoTIFF, read from a local copy at `ebirdabund_cache/nightlights/World_Atlas_2015.tif`. Float32 radiance proxy in mcd/m²; NoData values over oceans and the polar gap are set to 0 at extraction. log1p because the distribution is heavily right-skewed with most of NSW near 0; chosen as a complement to `pop_density` because population captures *where people live* while nightlights captures *where energy is used at night* — they are correlated but not identical, with major roads, industrial sites, regional towns, and ports lit beyond their resident populations.)
 - `log1p(tree_height)` — k=4 (Meta/WRI Canopy Height Maps v2 — DINOv3, 2024 imagery; native ~1 m, streamed via VSICURL from `s3://dataforgood-fb-data/forests/v2/global/dinov3_global_chm_v2_ml3/chm/` at OVERVIEW_LEVEL=4 ≈ 38 m, the closest pre-built overview to our ~30 m cache target. Pixels >60 m are set to NA (model misclassifies tall narrow non-vegetation — wind turbines on ridge crests, transmission towers, silos — as canopy). The cache is then **p90-aggregated** to the master ~1 km template: each output cell takes the 90th percentile of its source pixels, capturing emergent canopy structure (tall trees as hollow/perch habitat) while excluding residual artefacts that sit in the top ~0.1%. NA values at extraction set to 0. Replaces the earlier OzTreeMap layer, which had WCS grid artefacts.)
+- `palsar_hv` — k=4, no transform (ALOS-2 PALSAR-2 yearly mosaic gamma0, HV polarization, year 2020 by default; L-band ~24 cm wavelength penetrates canopy and responds to woody biomass/volume scattering, so it picks up sub-canopy structure that CHMv2 height cannot resolve. Streamed via VSICURL from Microsoft Planetary Computer's COG mirror of the JAXA ALOS-2 PALSAR-2 collection at `OVERVIEW_LEVEL=3` ≈ 200 m, then aggregated to the master ~1 km template **in linear power space** before converting back to dB — dB is a log scale, so arithmetic-mean of dB would underweight bright pixels. STAC search → SAS-signed per-asset URLs → VSICURL; no MPC subscription key required. JAXA calibration: gamma0(dB) = 20·log10(DN) − 83; DN==0 is no-data. NA at extraction is median-imputed because `water_occ` already encodes the wet/dry signal and ocean-pixel NAs shouldn't pull predictions to an extreme. No log transform applied because dB is already on a log scale. Adopted from `covariate_tests/palsar_hv_2020/`: forest-interior species are the biggest winners — Superb Lyrebird +0.0039 dev expl, Eastern Whipbird +0.0020, Rose Robin +0.0027; Pacific Black Duck and Welcome Swallow correctly show no gain.)
 
 Effort covariates are log-transformed because they are right-skewed and the log scale distributes knots more evenly. The transformation happens inside the GAM formula string so raw column values flow through unchanged — the prediction surface (`duration_minutes = 60`, `effort_distance_km = 1`) is evaluated correctly.
 
@@ -306,7 +309,7 @@ First concrete use: `analysis/tree_height/test_tree_height_alternatives.R` runs 
     - Recommended sequencing: do C first (cheap, may be sufficient), then A on the cached raster if stripes persist, then B if also rolling out to other regions.
 - **Generalise `nsw_species_list.R`**: It's NSW-specific (variable names, output file name, plot title). Wrapping it into a function `generate_species_list(region_name, ebd_path, samp_path, ...)` would make it reusable for geographic scaling.
 - **Taxonomy file**: `nsw_ebird_taxonomy.csv` is derived from the NSW EBD. For other regions, this needs to be generated from the regional EBD or replaced with the full eBird taxonomy (available from eBird as `eBird_taxonomy_v*.csv`).
-- **Covariate cache versioning**: The cache key uses `v6` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
+- **Covariate cache versioning**: The cache key uses `v7` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
 - **REZ script parameterisation**: `rez_abundance.R` paths and the `TOP_N = 50` cutoff are hard-coded. Making it accept command-line arguments would make it easier to run for new regions or different analysis polygons.
 - **Parallel memory**: `n_cores` is read from `config.yaml` (default `6`). Each worker peaks at ~2 GB RSS (sampling master + zerofill + mgcv::bam state). Three mitigations are now built into `estimate_abundance_batch()`:
     - `terra::terraOptions(memfrac = 0.05)` is set on every worker, so the per-process terra raster cache is capped at ~5% of system RAM. The default of ~60% is per-process and so would, with N workers, claim N×60% — slow drift to jetsam pressure on long runs.

@@ -227,6 +227,106 @@ load_nightlights <- function(path, ext, template) {
   terra::resample(terra::crop(r, ext), template)
 }
 
+# Load ALOS-2 PALSAR-2 yearly mosaic gamma0 (HV polarization, L-band SAR)
+# from Microsoft Planetary Computer's COG mirror.
+#
+# Access: STAC search → per-asset SAS signing → VSICURL on signed URL.
+# No subscription key required; signed URLs expire after ~1 hour but the
+# merged dB raster is cached to disk so subsequent calls skip the network.
+#
+# PALSAR COGs are 4500x4500 at 25 m native, with built-in overviews at:
+#   L0 native (4500x4500, 25 m), L1 (2250, 50 m), L2 (1125, 100 m),
+#   L3 (563, 200 m), L4 (282, 400 m).
+# We aggregate to the ~1 km template, so reading at L3 (~200 m) is plenty
+# fine and downloads ~64x less data than native.
+#
+# JAXA calibration: gamma0 (dB) = 20 * log10(DN) - 83.0; DN == 0 is no-data.
+# SAR backscatter must be averaged in linear power, not dB, when aggregating
+# (dB is a log scale; arithmetic-mean of dB underweights bright pixels).
+load_palsar_hv <- function(bb, ext, template, cache_dir, year = 2020L,
+                           overview_level = 3L) {
+  cache_file <- file.path(cache_dir, sprintf(
+    "palsar_hv_%d_%.2f_%.2f_%.2f_%.2f.tif",
+    year, bb[1], bb[2], bb[3], bb[4]
+  ))
+
+  if (!file.exists(cache_file)) {
+    Sys.setenv(
+      VSI_CACHE                    = "TRUE",
+      VSI_CACHE_SIZE               = "536870912",
+      GDAL_DISABLE_READDIR_ON_OPEN = "EMPTY_DIR",
+      GDAL_HTTP_MULTIPLEX          = "YES",
+      GDAL_HTTP_VERSION            = "2"
+    )
+
+    stac_url <- sprintf(
+      paste0("https://planetarycomputer.microsoft.com/api/stac/v1/search?",
+             "collections=alos-palsar-mosaic&bbox=%f,%f,%f,%f",
+             "&datetime=%d-01-01/%d-12-31&limit=500"),
+      bb[1], bb[2], bb[3], bb[4], year, year
+    )
+    items <- jsonlite::fromJSON(stac_url, simplifyVector = FALSE)$features
+    message(sprintf("  PALSAR STAC: %d items for year %d",
+                    length(items), year))
+    if (length(items) == 0L) stop("No PALSAR items in bbox/year")
+
+    tiles <- list()
+    t0 <- Sys.time()
+    for (i in seq_along(items)) {
+      it     <- items[[i]]
+      href   <- it$assets$HV$href
+      signed <- jsonlite::fromJSON(sprintf(
+        "https://planetarycomputer.microsoft.com/api/sas/v1/sign?href=%s",
+        utils::URLencode(href, reserved = TRUE)
+      ))$href
+      r <- tryCatch(
+        terra::rast(paste0("/vsicurl/", signed),
+                    opts = sprintf("OVERVIEW_LEVEL=%d", overview_level)),
+        error = function(e) { message("    open failed: ", e$message); NULL }
+      )
+      if (is.null(r)) next
+      cr <- tryCatch(
+        terra::crop(r, ext, snap = "out"),
+        error = function(e) NULL
+      )
+      if (!is.null(cr) && prod(dim(cr)[1:2]) > 0L) {
+        tiles[[length(tiles) + 1L]] <- cr
+      }
+      if (i %% 25L == 0L) {
+        elapsed <- as.numeric(Sys.time() - t0, units = "secs")
+        message(sprintf("    %d/%d items in %.0fs",
+                        i, length(items), elapsed))
+      }
+    }
+    if (length(tiles) == 0L) stop("No PALSAR tiles loaded")
+
+    merged <- if (length(tiles) == 1L) tiles[[1L]]
+              else terra::mosaic(terra::sprc(tiles), fun = "mean")
+
+    merged <- terra::ifel(merged == 0, NA, 20 * log10(merged) - 83.0)
+
+    terra::writeRaster(
+      merged, cache_file, overwrite = TRUE,
+      gdal = c("COMPRESS=DEFLATE", "TILED=YES", "BIGTIFF=IF_SAFER")
+    )
+    message(sprintf("  PALSAR HV cached: %s (%d tiles)",
+                    basename(cache_file), length(tiles)))
+  }
+
+  raw      <- terra::rast(cache_file)
+  raw_crop <- terra::crop(raw, ext)
+
+  # Aggregate to template resolution in linear power, then back to dB.
+  ratio <- round(terra::res(template)[1] / terra::res(raw_crop)[1])
+  if (ratio > 1L) {
+    raw_lin <- 10^(raw_crop / 10)
+    agg_lin <- terra::aggregate(raw_lin, fact = ratio, fun = "mean",
+                                na.rm = TRUE)
+    raw_crop <- 10 * log10(agg_lin)
+  }
+  terra::resample(raw_crop, template, method = "bilinear")
+}
+
 #' Download and cache habitat covariates for a study region
 #'
 #' Downloads ESA WorldCover land-cover layers and SRTM elevation from the
@@ -253,18 +353,24 @@ load_nightlights <- function(path, ext, template) {
 #'   Pekel et al. 2016 updated 2021, streamed via VSICURL),
 #'   \code{clay} (SoilGrids 0–5 cm clay percent, 250 m), and
 #'   \code{tree_height} (Meta/WRI Canopy Height Maps v2 DINOv3, 2024 imagery,
-#'   ~38 m effective via OVERVIEW_LEVEL=4 of the source COG pyramid), and
+#'   ~38 m effective via OVERVIEW_LEVEL=4 of the source COG pyramid),
 #'   \code{nightlights} (Falchi/Cinzano World Atlas of Artificial Night Sky
-#'   Brightness 2015, ~1 km, read from a local GeoTIFF).
+#'   Brightness 2015, ~1 km, read from a local GeoTIFF), and
+#'   \code{palsar_hv} (ALOS-2 PALSAR-2 yearly mosaic gamma0 HV polarization
+#'   in dB, ~200 m via OVERVIEW_LEVEL=3 of the MPC COG mirror, aggregated
+#'   to template in linear power then converted back to dB).
 #'
 #' @param nightlights_path Path to the World Atlas 2015 nightlights GeoTIFF.
 #'   Defaults to \code{file.path(cache_dir, "nightlights/World_Atlas_2015.tif")}.
+#' @param palsar_year Year of the ALOS-2 PALSAR-2 yearly mosaic (Microsoft
+#'   Planetary Computer offers 2015–2021). Default \code{2020L}.
 #'
 #' @export
 prepare_covariates <- function(polygon,
-                               cache_dir       = "ebirdabund_cache",
-                               buffer_deg      = 0.5,
-                               nightlights_path = NULL) {
+                               cache_dir        = "ebirdabund_cache",
+                               buffer_deg       = 0.5,
+                               nightlights_path = NULL,
+                               palsar_year      = 2020L) {
   dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
 
   bb  <- as.numeric(sf::st_bbox(sf::st_transform(polygon, 4326)))
@@ -276,8 +382,9 @@ prepare_covariates <- function(polygon,
   # Cache key: rounded bbox + version tag (bump version when layer set changes)
   # v5: tree_height switched from OzTreeMap (CSIRO WCS) to Meta/WRI CHMv2.
   # v6: added nightlights (Falchi/Cinzano World Atlas 2015).
+  # v7: added palsar_hv (ALOS-2 PALSAR-2 yearly mosaic, MPC COG mirror).
   key        <- paste(round(bb, 2), collapse = "_")
-  stack_path <- file.path(cache_dir, paste0("cov_stack_v6_", key, ".tif"))
+  stack_path <- file.path(cache_dir, paste0("cov_stack_v7_", key, ".tif"))
 
   if (is.null(nightlights_path)) {
     nightlights_path <- file.path(cache_dir, "nightlights", "World_Atlas_2015.tif")
@@ -344,15 +451,19 @@ prepare_covariates <- function(polygon,
   message("  nightlights (Falchi/Cinzano World Atlas 2015)")
   nightlights <- load_nightlights(nightlights_path, ext, lc_layers[[1]])
 
+  message(sprintf("  PALSAR HV gamma0 (ALOS-2 yearly mosaic, %d)", palsar_year))
+  palsar_hv <- load_palsar_hv(bb, ext, lc_layers[[1]], cache_dir,
+                              year = palsar_year)
+
   stack <- terra::rast(c(
     lc_layers,
     list(elev, precip_annual, temp_annual, pop_density,
-         water_occ, clay, tree_height, nightlights)
+         water_occ, clay, tree_height, nightlights, palsar_hv)
   ))
   names(stack) <- c(
     paste0("lc_", lc_vars),
     "elevation", "precip_annual", "temp_annual", "pop_density", "water_occ",
-    "clay", "tree_height", "nightlights"
+    "clay", "tree_height", "nightlights", "palsar_hv"
   )
 
   terra::writeRaster(stack, stack_path, overwrite = TRUE)
@@ -388,6 +499,14 @@ extract_covariates <- function(df, cov_stack) {
   # World Atlas NoData (oceans, polar gap) → 0 brightness.
   if ("nightlights" %in% names(vals)) {
     vals$nightlights[is.na(vals$nightlights)] <- 0
+  }
+  # PALSAR HV returns NA at ocean/coastal pixels (DN==0 masked at calibration)
+  # and at mosaic tile edges. Median-impute so checklists near the coast
+  # don't pull predictions to an extreme value; water_occ already encodes
+  # the wet/dry signal separately.
+  if ("palsar_hv" %in% names(vals)) {
+    palsar_med <- stats::median(vals$palsar_hv, na.rm = TRUE)
+    vals$palsar_hv[is.na(vals$palsar_hv)] <- palsar_med
   }
 
   dplyr::bind_cols(df, vals)

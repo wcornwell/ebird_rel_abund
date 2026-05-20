@@ -57,7 +57,7 @@ build_gam_formula <- function(df, hab_cols) {
 # Returns the fitted mgcv::gam object.
 fit_gam <- function(df) {
   hab_cols <- grep(
-    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height|nightlights)",
+    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height|nightlights|palsar_hv)",
     names(df), value = TRUE
   )
   hab_cols <- setdiff(hab_cols, "lc_shrubs")
