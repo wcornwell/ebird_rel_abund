@@ -337,7 +337,7 @@ prepare_sampling_master <- function(sampling_txt, polygon, cov_stack, cache_dir)
 
   # Drop rows where covariates are missing (ocean edges, raster gaps)
   cov_cols <- grep(
-    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height)",
+    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height|nightlights)",
     names(samp), value = TRUE
   )
   n_before <- nrow(samp)

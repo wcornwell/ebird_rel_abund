@@ -419,7 +419,7 @@ paired_cv_one_species <- function(species,
 # Detect habitat covariate columns the same way fit_gam() does.
 detect_hab_cols <- function(df) {
   hab <- grep(
-    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height)",
+    "^(lc_|elevation|precip_|temp_|pop_|water_|clay|tree_height|nightlights)",
     names(df), value = TRUE
   )
   hab <- setdiff(hab, "lc_shrubs")

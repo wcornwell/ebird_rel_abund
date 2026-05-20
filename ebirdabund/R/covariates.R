@@ -215,6 +215,18 @@ load_meta_chmv2 <- function(bb, ext, template, cache_dir,
   terra::resample(agg, template, method = "bilinear")
 }
 
+# Load Falchi/Cinzano World Atlas of Artificial Night Sky Brightness 2015
+# from a local GeoTIFF. Global WGS84 at ~30 arc-seconds (~1 km), Float32
+# radiance proxy (mcd/m²) with a sentinel NoData value over oceans.
+# Crops in native CRS then resamples to template.
+load_nightlights <- function(path, ext, template) {
+  if (!file.exists(path)) {
+    stop("Nightlights raster not found at: ", path)
+  }
+  r <- terra::rast(path)
+  terra::resample(terra::crop(r, ext), template)
+}
+
 #' Download and cache habitat covariates for a study region
 #'
 #' Downloads ESA WorldCover land-cover layers and SRTM elevation from the
@@ -241,12 +253,18 @@ load_meta_chmv2 <- function(bb, ext, template, cache_dir,
 #'   Pekel et al. 2016 updated 2021, streamed via VSICURL),
 #'   \code{clay} (SoilGrids 0–5 cm clay percent, 250 m), and
 #'   \code{tree_height} (Meta/WRI Canopy Height Maps v2 DINOv3, 2024 imagery,
-#'   ~38 m effective via OVERVIEW_LEVEL=4 of the source COG pyramid).
+#'   ~38 m effective via OVERVIEW_LEVEL=4 of the source COG pyramid), and
+#'   \code{nightlights} (Falchi/Cinzano World Atlas of Artificial Night Sky
+#'   Brightness 2015, ~1 km, read from a local GeoTIFF).
+#'
+#' @param nightlights_path Path to the World Atlas 2015 nightlights GeoTIFF.
+#'   Defaults to \code{file.path(cache_dir, "nightlights/World_Atlas_2015.tif")}.
 #'
 #' @export
 prepare_covariates <- function(polygon,
-                               cache_dir  = "ebirdabund_cache",
-                               buffer_deg = 0.5) {
+                               cache_dir       = "ebirdabund_cache",
+                               buffer_deg      = 0.5,
+                               nightlights_path = NULL) {
   dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
 
   bb  <- as.numeric(sf::st_bbox(sf::st_transform(polygon, 4326)))
@@ -257,8 +275,13 @@ prepare_covariates <- function(polygon,
 
   # Cache key: rounded bbox + version tag (bump version when layer set changes)
   # v5: tree_height switched from OzTreeMap (CSIRO WCS) to Meta/WRI CHMv2.
+  # v6: added nightlights (Falchi/Cinzano World Atlas 2015).
   key        <- paste(round(bb, 2), collapse = "_")
-  stack_path <- file.path(cache_dir, paste0("cov_stack_v5_", key, ".tif"))
+  stack_path <- file.path(cache_dir, paste0("cov_stack_v6_", key, ".tif"))
+
+  if (is.null(nightlights_path)) {
+    nightlights_path <- file.path(cache_dir, "nightlights", "World_Atlas_2015.tif")
+  }
 
   if (file.exists(stack_path)) {
     message("Loading cached covariate stack from ", stack_path)
@@ -318,15 +341,18 @@ prepare_covariates <- function(polygon,
   message("  canopy height (Meta/WRI CHMv2 DINOv3, ~38 m via OL=4)")
   tree_height <- load_meta_chmv2(bb, ext, lc_layers[[1]], cache_dir)
 
+  message("  nightlights (Falchi/Cinzano World Atlas 2015)")
+  nightlights <- load_nightlights(nightlights_path, ext, lc_layers[[1]])
+
   stack <- terra::rast(c(
     lc_layers,
     list(elev, precip_annual, temp_annual, pop_density,
-         water_occ, clay, tree_height)
+         water_occ, clay, tree_height, nightlights)
   ))
   names(stack) <- c(
     paste0("lc_", lc_vars),
     "elevation", "precip_annual", "temp_annual", "pop_density", "water_occ",
-    "clay", "tree_height"
+    "clay", "tree_height", "nightlights"
   )
 
   terra::writeRaster(stack, stack_path, overwrite = TRUE)
@@ -358,6 +384,10 @@ extract_covariates <- function(df, cov_stack) {
   if ("clay" %in% names(vals)) {
     clay_med <- median(vals$clay, na.rm = TRUE)
     vals$clay[is.na(vals$clay)] <- clay_med
+  }
+  # World Atlas NoData (oceans, polar gap) → 0 brightness.
+  if ("nightlights" %in% names(vals)) {
+    vals$nightlights[is.na(vals$nightlights)] <- 0
   }
 
   dplyr::bind_cols(df, vals)

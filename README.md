@@ -175,6 +175,58 @@ The Stage 1 calibration runs once via `build_observer_expertise.R` and writes `o
 
 The package implements the core pipeline of Strimas-Mackey et al. (2023) — spatiotemporal hex subsampling → negative-binomial GAM → standardised-effort prediction — and generalises it by:
 
+---
+
+## Experiments and methodological tests
+
+A running record of the small evaluations behind the choices encoded above, plus exploratory tests that didn't (or haven't yet) made it into the pipeline. All scripts are committed under `analysis/{topic}/`; outputs under `covariate_tests/{variant}/` or alongside the script. Most use a fixed 19-species test set (`analysis/covariate_test_species.csv`) spanning forest, woodland, open-country, water, urban, arid, alpine, and three deliberately-weak (low dev. expl.) species so deltas are comparable across experiments over time.
+
+Statuses: **Adopted** = encoded in the production pipeline. **Tested, not adopted** = no measurable improvement vs baseline (paired Wilcoxon p > 0.05 or deltas at fold-noise scale). **Pending** = scoped or scripted but not yet run at scale. **Diagnostic** = visual/exploratory, no go/no-go outcome.
+
+### Model family and formulation
+
+| Test | Question | Outcome | Script |
+|---|---|---|---|
+| Tweedie vs Negative Binomial | Which count family fits eBird better? | **Adopted NB** (chosen a priori; see Modelling Decisions in CLAUDE.md) | `analysis/modeling/test_tweedie_vs_nb.R` |
+| Log transforms on effort + habitat | Does log/log1p transforming right-skewed predictors (duration, distance, precip, pop_density) improve held-out skill? | **Adopted** (now baked into `build_gam_formula`) | `analysis/modeling/test_log_transforms.R` |
+
+### Habitat covariates
+
+| Test | Question | Outcome | Script |
+|---|---|---|---|
+| `pop_density` F-stat scan | Does WorldPop pop_density carry signal across ~40 species, or is it redundant with `lc_built`? | **Adopted** (significant in most species) | `analysis/modeling/test_pop_density.R` |
+| Tree-height layer choice | CHMv2 vs OzTreeMap vs ETH-Lang vs GLAD/Potapov? | **CHMv2 adopted** (replaces OzTreeMap; stripe-artefact mitigation tracked in CLAUDE.md) | `analysis/tree_height/test_tree_height_alternatives.R`, `test_chmv2_aggregation.R` |
+| CHMv2 two-stage p90 aggregation | Does 38 m → 250 m mean → 1 km p90 beat the current single-step p90 (proposed fix for stripe artefacts)? | **Tested, not adopted** (median ΔSpearman ≈ 0, paired Wilcoxon p > 0.5; see `covariate_tests/tree_height_two_stage_p90/summary.txt`) | `analysis/tree_height/test_tree_height_alternatives.R` |
+| CHMv2 layer diagnostics | Visual inspection of the canopy-height raster (native ~1 m, log-scale histograms, outlier provenance) | **Diagnostic** | `analysis/tree_height/check_tree_height_chmv2.R`, `diagnose_chmv2_outliers.R`, `test_chmv2_native_point*.R`, `test_chmv2_small.R` |
+| PALSAR HV backscatter | Does ALOS-2 PALSAR HV gamma0 add a sub-2 m woody-vegetation signal CHMv2 cannot resolve? | **Pending** (proof-of-concept + helper + smoke test built; full-scale CV pending) | `analysis/palsar/test_palsar_poc.R`, `test_palsar_helper_smoke.R`, `test_palsar_hv_cv.R` |
+
+### Effort terms and filters
+
+| Test | Question | Outcome | Script |
+|---|---|---|---|
+| Speed (km/h) as separate effort smooth | Does adding `s(log1p(speed_kph), k=4)` alongside duration & distance smooths improve held-out skill? (eBird S&T uses speed as a distinct effort variable) | **Tested — tiny but consistent improvement, adoption tbd** (19-species median ΔSpearman +0.0003, 17/19 wins, paired Wilcoxon p=0.0002; same direction for DevExpl 16/19, p=0.002 and MAE 12/7, p=0.014. Magnitude is at fold-noise scale.) | `analysis/effort_terms/test_speed_effort.R` |
+| Minimum duration: 10 → 5 min | Does lowering the duration threshold from 10 min (current) to 5 min add useful training data, or inflate detection noise? | **Pending** | `analysis/effort_terms/test_min_duration.R` |
+| High-count cap sweep | Where should the mega-flock cap sit (sweep 50 → ∞ on three species with different count tails)? | **Adopted cap = 200** | `analysis/count/test_count_threshold.R` |
+| X-count checklist exclusion | Should checklists with any X-count entry be dropped from the shared sampling pool *before* zero-fill, so every species sees the same denominator? | **Adopted** (`x_count_ids.rds` is now built once and applied across all species in the buffered cache) | `analysis/count/test_count_threshold.R`, `test_count_filter.R` |
+
+### Observer skill
+
+| Test | Question | Outcome | Script |
+|---|---|---|---|
+| `s(observer_id, bs="re")` on one species | Does an observer random effect substantively change predictions, or is it noise? | **Adopted as Stage 1 expertise score** — Superb Fairywren mean predicted abundance dropped 1.262 → 0.898 (ratio 0.71); ~30 % of "high numbers" was observer-skill variance bleeding into habitat smooths | `analysis/observer/test_observer_re.R` |
+
+### Integration / regional
+
+| Test | Question | Outcome | Script |
+|---|---|---|---|
+| Full NSW-only batch | End-to-end smoke test on the NSW polygon with NSW-only training data | **Reference** (original pre-buffer baseline; superseded by buffered run) | `analysis/integration/test_nsw.R` |
+| Full NSW + 100 km buffer batch | Same pipeline with ACT/VIC/QLD/SA buffer training data | **Adopted as production setup** (~397 k vs ~133 k checklists per species after subsampling) | `analysis/integration/test_nsw_buffer.R` |
+| Cross-region map comparison | Visual side-by-side of NSW-only vs buffered predictions for representative species | **Diagnostic** | `analysis/integration/plot_comparison_nsw.R` |
+
+---
+
+
+
 1. Accepting raw eBird EBD files rather than pre-processed CSVs.
 2. Downloading covariates automatically from open global sources (ESA WorldCover, SRTM, WorldClim, WorldPop, JRC Global Surface Water).
 3. Replacing interactive distribution comparison with a fixed Negative Binomial choice and automated convergence fallbacks.

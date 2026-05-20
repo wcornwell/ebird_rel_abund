@@ -43,9 +43,11 @@ ebird_rel_abund/
 │   └── integration/                   # Multi-state buffered run + cross-region plot comparisons
 │
 ├── ebirdabund_cache/        # Auto-generated cache (do not commit)
-│   ├── cov_stack_v5_*.tif   # Covariate raster stack (bbox + version keyed;
-│   │                        #   v5 = Meta CHMv2 replaces OzTreeMap for tree_height)
+│   ├── cov_stack_v6_*.tif   # Covariate raster stack (bbox + version keyed;
+│   │                        #   v5 = Meta CHMv2 replaces OzTreeMap for tree_height;
+│   │                        #   v6 = adds nightlights (Falchi/Cinzano 2015))
 │   ├── meta_chmv2_*.tif     # Cached Meta CHMv2 canopy-height raster (one per bbox)
+│   ├── nightlights/         # Falchi/Cinzano World Atlas 2015 GeoTIFF (local input)
 │   └── gadm/, climate/, elevation/, landuse/, population/, soil/  # Downloaded tiles
 │
 ├── ebirdabund_cache_nsw_buffer/  # Region-specific cache (do not commit)
@@ -194,6 +196,7 @@ To re-run from scratch: delete `species_maps/`, `ebirdabund_cache_nsw_buffer/`, 
 - `log1p(pop_density)` — k=4 (log1p: spans ~4 orders of magnitude)
 - `water_occ` — k=4
 - `clay` — k=4 (SoilGrids 0–5 cm clay fraction; NA at ocean/water set to 0)
+- `log1p(nightlights)` — k=4 (Falchi/Cinzano World Atlas of Artificial Night Sky Brightness 2015, ~1 km global GeoTIFF, read from a local copy at `ebirdabund_cache/nightlights/World_Atlas_2015.tif`. Float32 radiance proxy in mcd/m²; NoData values over oceans and the polar gap are set to 0 at extraction. log1p because the distribution is heavily right-skewed with most of NSW near 0; chosen as a complement to `pop_density` because population captures *where people live* while nightlights captures *where energy is used at night* — they are correlated but not identical, with major roads, industrial sites, regional towns, and ports lit beyond their resident populations.)
 - `log1p(tree_height)` — k=4 (Meta/WRI Canopy Height Maps v2 — DINOv3, 2024 imagery; native ~1 m, streamed via VSICURL from `s3://dataforgood-fb-data/forests/v2/global/dinov3_global_chm_v2_ml3/chm/` at OVERVIEW_LEVEL=4 ≈ 38 m, the closest pre-built overview to our ~30 m cache target. Pixels >60 m are set to NA (model misclassifies tall narrow non-vegetation — wind turbines on ridge crests, transmission towers, silos — as canopy). The cache is then **p90-aggregated** to the master ~1 km template: each output cell takes the 90th percentile of its source pixels, capturing emergent canopy structure (tall trees as hollow/perch habitat) while excluding residual artefacts that sit in the top ~0.1%. NA values at extraction set to 0. Replaces the earlier OzTreeMap layer, which had WCS grid artefacts.)
 
 Effort covariates are log-transformed because they are right-skewed and the log scale distributes knots more evenly. The transformation happens inside the GAM formula string so raw column values flow through unchanged — the prediction surface (`duration_minutes = 60`, `effort_distance_km = 1`) is evaluated correctly.
@@ -303,7 +306,7 @@ First concrete use: `analysis/tree_height/test_tree_height_alternatives.R` runs 
     - Recommended sequencing: do C first (cheap, may be sufficient), then A on the cached raster if stripes persist, then B if also rolling out to other regions.
 - **Generalise `nsw_species_list.R`**: It's NSW-specific (variable names, output file name, plot title). Wrapping it into a function `generate_species_list(region_name, ebd_path, samp_path, ...)` would make it reusable for geographic scaling.
 - **Taxonomy file**: `nsw_ebird_taxonomy.csv` is derived from the NSW EBD. For other regions, this needs to be generated from the regional EBD or replaced with the full eBird taxonomy (available from eBird as `eBird_taxonomy_v*.csv`).
-- **Covariate cache versioning**: The cache key uses `v5` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
+- **Covariate cache versioning**: The cache key uses `v6` as a hard-coded version tag. If covariate layers are updated, this needs a manual bump. A hash of the source URLs or a date stamp would be more robust.
 - **REZ script parameterisation**: `rez_abundance.R` paths and the `TOP_N = 50` cutoff are hard-coded. Making it accept command-line arguments would make it easier to run for new regions or different analysis polygons.
 - **Parallel memory**: `n_cores` is read from `config.yaml` (default `6`). Each worker peaks at ~2 GB RSS (sampling master + zerofill + mgcv::bam state). Three mitigations are now built into `estimate_abundance_batch()`:
     - `terra::terraOptions(memfrac = 0.05)` is set on every worker, so the per-process terra raster cache is capped at ~5% of system RAM. The default of ~60% is per-process and so would, with N workers, claim N×60% — slow drift to jetsam pressure on long runs.
@@ -316,6 +319,10 @@ First concrete use: `analysis/tree_height/test_tree_height_alternatives.R` runs 
 
 - **Incremental stack building**: The stack-building step at the end of `run_batch_nsw.R` re-reads all TIFs. For very large species lists, this is slow. Could build incrementally or defer to a separate script.
 - **Smooth plotting**: `plot_gam_smooths()` in `utils.R` saves a static PNG. Interactive HTML (e.g. via `plotly`) would make diagnosing smooth shapes much faster.
+- **GEDI canopy structure (FHD / PAVD) — deferred, conditional on geographic scaling**: Recent bird SDM literature (Burns 2020 ERL; Schulte to Bühne et al. 2024 RSE) shows canopy structure metrics *beyond* height — foliage height diversity, plant area volume density at vertical strata — add signal for forest-interior species. The [Burns/Hakkenberg/Goetz 2024 gridded GEDI product](https://www.nature.com/articles/s41597-024-03668-4) ([GEE: `LARSE/GEDI/GEDI_GRIDDEDVEG_002_COUNTS_V1_1KM`](https://developers.google.com/earth-engine/datasets/catalog/LARSE_GEDI_GRIDDEDVEG_002_COUNTS_V1_1KM)) packages 36 such metrics at 1 km globally. Two caveats make this low priority for NSW:
+    - **Coverage is shot-sample, not wall-to-wall.** GEDI is a sampling lidar on the ISS (8 tracks, ~600 m apart, 25 m footprints). Gridded products recommend ≥10 shots per 1 km cell for reliability; cells below threshold are NA. In NSW the arid/saltbush west and Riverina have low shot density over low/bare cover, so a large fraction of the study polygon would be NA. The batch pipeline expects no-NA covariates, so we'd need a hybrid imputation (zero-prior in sparse-canopy cells, bbox median otherwise) plus a binary "GEDI-observed" mask as a separate predictor — non-trivial engineering.
+    - **Expected gain is concentrated in a minority of species.** Forest-interior species along the GDR/coast (treecreepers, sittellas, scrubwrens, lyrebird, large hollow-nesters) are where vertical structure beyond canopy height matters; for these, GEDI shot density is adequate. For arid/open-country species (most of NSW by area) the layer would mostly be imputed and uninformative, and CHMv2 already covers the height gradient.
+    - **Reconsider when**: scaling to Tasmania, wet-tropics QLD, or NZ — regions with a higher proportion of forest-interior species and denser GEDI coverage. At that point the cost/benefit flips. Scoping notes in chat history (2026-05-18).
 
 ---
 
