@@ -232,11 +232,11 @@ zero_fill <- function(sampling_df, ebd_df) {
 # slow path in load_ebird() when no x_count_ids.rds is present). When the
 # shared pool has already excluded X-count checklists from sampling, this
 # filter matches nothing.
-clean_ebird <- function(zf, max_count = 200L) {
+clean_ebird <- function(zf, max_count = 200L, min_duration_minutes = 10L) {
   zf |>
     dplyr::filter(
       .data$observation_count != "X",
-      .data$duration_minutes >= 10,
+      .data$duration_minutes >= min_duration_minutes,
       .data$duration_minutes <= 300,
       is.na(.data$effort_distance_km) | .data$effort_distance_km <= 10,
       .data$number_observers <= 10,
