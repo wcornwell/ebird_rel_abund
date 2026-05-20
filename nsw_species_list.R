@@ -70,10 +70,16 @@ ebd <- as.data.frame(fread(
 ))
 names(ebd) <- c("common_name", "observation_count", "checklist_id")
 
-# Keep only valid complete checklists; drop X counts; exclude non-species
-# (slash taxa "A/B", spuh "sp.", hybrids "A x B (hybrid)")
+# Keep only valid complete checklists; drop X counts; exclude non-species:
+#   slash taxa  "A/B"
+#   spuh        "...sp."           (also matches "...sp. (qualifier)" forms
+#                                   like "Accipitrine hawk sp. (former
+#                                   Accipiter sp.)" — anchoring to $ misses
+#                                   those because of the trailing
+#                                   parenthetical)
+#   hybrids     "A x B (hybrid)"
 is_true_species <- function(name) {
-  !grepl("/|\\bsp\\.$| x .*(hybrid)", name, perl = TRUE)
+  !grepl("/|\\bsp\\.| x .*\\(hybrid\\)", name, perl = TRUE)
 }
 
 ebd <- ebd[
