@@ -94,15 +94,40 @@ load_range_ebirdst <- function(species, resolution) {
 #
 # botw_path  : path to BOTW_2025.gpkg (or equivalent)
 # sci_name   : scientific name matching the BOTW sci_name field
+# aliases    : optional data frame with columns ebird_sci_name + botw_sci_name
+#              for species where eBird and BirdLife disagree on taxonomy
+#              (genus reshuffles, gender-agreement renames, splits).
+#              On a hit, the BOTW query is rewritten to use botw_sci_name.
+#              An empty/NA botw_sci_name short-circuits the lookup (used to
+#              record "no BOTW equivalent exists"; avoids a guaranteed-zero
+#              SQL round-trip).
 #
 # Filters to extant/probably-extant (presence 1-2), established populations
 # (origin 1-3, 6; excludes vagrants=4 and uncertain=5), and non-passage
 # seasons (seasonal 1-3; excludes passage=4 and uncertain=5).
 #
 # Returns an sf polygon or NULL if not found.
-load_range_botw <- function(sci_name, botw_path) {
+load_range_botw <- function(sci_name, botw_path, aliases = NULL) {
   if (is.null(sci_name) || is.na(sci_name) || !file.exists(botw_path))
     return(NULL)
+
+  query_name <- sci_name
+  if (!is.null(aliases) && nrow(aliases) > 0L) {
+    hit <- aliases[!is.na(aliases$ebird_sci_name) &
+                     aliases$ebird_sci_name == sci_name, , drop = FALSE]
+    if (nrow(hit) > 0L) {
+      alias_to <- hit$botw_sci_name[1L]
+      if (is.na(alias_to) || !nzchar(alias_to)) {
+        message(sprintf(
+          "  BOTW: alias map records no BOTW equivalent for '%s' — skipping.",
+          sci_name))
+        return(NULL)
+      }
+      message(sprintf("  BOTW: aliasing '%s' -> '%s' (per botw_name_aliases).",
+                      sci_name, alias_to))
+      query_name <- alias_to
+    }
+  }
 
   query <- sprintf(
     "SELECT geom FROM all_species
@@ -110,7 +135,7 @@ load_range_botw <- function(sci_name, botw_path) {
        AND presence IN (1, 2)
        AND origin   IN (1, 2, 3, 6)
        AND seasonal IN (1, 2, 3)",
-    gsub("'", "''", sci_name)   # escape any apostrophes in name
+    gsub("'", "''", query_name)   # escape any apostrophes in name
   )
 
   tryCatch(
@@ -119,7 +144,7 @@ load_range_botw <- function(sci_name, botw_path) {
       if (nrow(r) == 0) NULL else r
     },
     error = function(e) {
-      warning("BOTW: error loading range for '", sci_name, "': ",
+      warning("BOTW: error loading range for '", query_name, "': ",
               conditionMessage(e))
       NULL
     }

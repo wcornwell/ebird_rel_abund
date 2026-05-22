@@ -163,6 +163,11 @@ fit_species_model <- function(polygon,
 #'   masking with a warning if the range cannot be loaded.
 #' @param range_resolution Resolution passed to `ebirdst::load_ranges`;
 #'   `"27km"` (default) or `"9km"`.
+#' @param botw_aliases Optional data frame with columns `ebird_sci_name`
+#'   and `botw_sci_name`, mapping species whose names differ between eBird
+#'   and BirdLife (genus reshuffles, gender-agreement renames, splits).
+#'   Forwarded to [load_range_botw()]; an empty `botw_sci_name` short-circuits
+#'   the BOTW lookup for species with no BOTW equivalent.
 #'
 #' @return A list with:
 #' \describe{
@@ -181,6 +186,7 @@ predict_species_map <- function(model_fit,
                                 peak_time        = NULL,
                                 use_range        = TRUE,
                                 botw_path        = NULL,
+                                botw_aliases     = NULL,
                                 range_resolution = "9km",
                                 border           = NULL,
                                 range_vect       = NULL) {
@@ -249,7 +255,7 @@ predict_species_map <- function(model_fit,
       # 2. Fall back to BOTW
       if (is.null(mask_result) && !is.null(botw_path) &&
           !is.null(sci_name) && !is.na(sci_name)) {
-        range_botw  <- load_range_botw(sci_name, botw_path)
+        range_botw  <- load_range_botw(sci_name, botw_path, botw_aliases)
         mask_result <- try_mask(r_pred, range_botw, "BOTW")
         if (!is.null(mask_result)) range_source <- "BOTW"
       }
@@ -311,6 +317,9 @@ predict_species_map <- function(model_fit,
 #'   are set to `NA`. See [predict_species_map()] for details.
 #' @param range_resolution Resolution for `ebirdst::load_ranges`; `"27km"`
 #'   (default) or `"9km"`.
+#' @param botw_aliases Optional data frame with columns `ebird_sci_name`
+#'   and `botw_sci_name`, mapping species whose names differ between eBird
+#'   and BirdLife. Forwarded to [load_range_botw()].
 #'
 #' @return A named list with:
 #' \describe{
@@ -366,6 +375,7 @@ estimate_abundance <- function(polygon,
                                peak_time        = NULL,
                                use_range        = TRUE,
                                botw_path        = NULL,
+                               botw_aliases     = NULL,
                                range_resolution = "27km") {
 
   model_fit <- fit_species_model(
@@ -389,6 +399,7 @@ estimate_abundance <- function(polygon,
     peak_time        = peak_time,
     use_range        = use_range,
     botw_path        = botw_path,
+    botw_aliases     = botw_aliases,
     range_resolution = range_resolution
   )
 

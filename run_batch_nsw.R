@@ -29,6 +29,21 @@ BOTW_PATH      <- cfg$botw_path
 TAXONOMY       <- cfg$taxonomy_file
 GRID_RES_KM    <- unlist(cfg$grid_resolutions_km)
 
+# Optional eBird->BOTW name alias map. Used by load_range_botw() to look up
+# species whose names differ between eBird/Clements and BirdLife taxonomies
+# (genus reshuffles, gender-agreement renames, splits). Empty botw_sci_name
+# rows record "no BOTW equivalent" — the lookup short-circuits to NULL.
+BOTW_ALIASES_FILE <- if (!is.null(cfg$botw_aliases_file)) {
+  cfg$botw_aliases_file
+} else {
+  "botw_name_aliases.csv"
+}
+botw_aliases <- if (file.exists(BOTW_ALIASES_FILE)) {
+  read.csv(BOTW_ALIASES_FILE, stringsAsFactors = FALSE)
+} else {
+  NULL
+}
+
 # Study polygon configuration
 STUDY_BBOX_COUNTRY <- cfg$study_polygon$country
 STUDY_BBOX_REGION  <- cfg$study_polygon$region
@@ -332,6 +347,7 @@ if (length(species_list) == 0) {
     cache_dir    = ZEROFILL_CACHE,
     grid_res_km  = GRID_RES_KM,
     botw_path    = BOTW_PATH,
+    botw_aliases = botw_aliases,
     border       = nsw,
     output_dir   = OUTPUT_DIR,
     log_file     = LOG_FILE,

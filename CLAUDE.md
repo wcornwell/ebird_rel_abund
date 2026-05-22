@@ -212,6 +212,10 @@ Effort covariates are log-transformed because they are right-skewed and the log 
 
 **Range masking**: ebirdst 2023 preferred; falls back to BOTW 2025 if the species is not in the ebirdst catalogue or if the ebirdst mask produces zero abundance over the study region. ~266 of 479 modelled NSW species are in the ebirdst 2023 catalogue. Ranges are pre-downloaded by `run_batch_nsw.R` before the batch (download step is skipped for species already cached locally). The `range_source` column in `batch_nsw_log.csv` records which source was used per species.
 
+**BOTW name aliases** (`botw_name_aliases.csv` at repo root): eBird/Clements and BirdLife/HBW disagree on a number of recent genus reshuffles, gender-agreement renames, and splits (e.g. Plum-headed Finch is `Emblema modestum` in eBird but `Neochmia modesta` in BOTW). Without a translation layer, the BOTW fallback returns 0 rows for these species and the prediction is left unmasked. `load_range_botw()` consults the alias CSV (passed in by `run_batch_nsw.R`) and rewrites its query to the BOTW name on a hit. Columns: `ebird_sci_name`, `botw_sci_name`, `common_name`, `note`. An empty `botw_sci_name` records "no BOTW equivalent exists" and short-circuits the lookup to avoid a guaranteed-zero round-trip. The file is region-agnostic — add entries as new taxonomy splits surface (audit by filtering `batch_nsw_log.csv` for `range_source == "unmasked"` after each batch and checking BOTW for synonyms).
+
+Aliases only fix the **name-mismatch** failure mode. A separate, larger group of species shows `range_source == "unmasked"` because BOTW *has* the species under its eBird name, but `load_range_botw`'s conservative filter (`seasonal IN (1,2,3)`, i.e. resident/breeding/non-breeding only) excludes their qualifying polygons — typically passage migrants (jaegers, sand-plovers, Wandering Tattler, Aleutian Tern) and pelagic seabirds (albatrosses, shearwaters). Fixing those requires either relaxing the filter for selected species or adding an explicit per-species "use seasonal=4" override; deferred for a follow-up.
+
 ---
 
 ## Observer Expertise (Stage 1)
