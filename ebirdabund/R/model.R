@@ -85,24 +85,38 @@ fit_gam <- function(df) {
 
   message("Fitting negative-binomial GAM (", nrow(df), " checklists)...")
 
-  fit_bam <- function(select) {
+  # Drop gamma first (theta-MLE NaN in irruption-flock species fixes by
+  # lowering the penalty), then drop select, then drop discrete=TRUE.
+  gamma_bic <- log(nrow(df)) / 2
+  attempts <- list(
+    list(gamma = gamma_bic, select = TRUE,  discrete = TRUE,
+         label = sprintf("gamma=%.2f (BIC)", gamma_bic)),
+    list(gamma = 2.0,       select = TRUE,  discrete = TRUE,
+         label = "gamma=2.0"),
+    list(gamma = 1.4,       select = TRUE,  discrete = TRUE,
+         label = "gamma=1.4"),
+    list(gamma = 1.4,       select = FALSE, discrete = TRUE,
+         label = "gamma=1.4, select=FALSE"),
+    list(gamma = 1.4,       select = TRUE,  discrete = FALSE,
+         label = "gamma=1.4, discrete=FALSE")
+  )
+
+  fit_bam <- function(gamma_val, select_, discrete_) {
     converged <- TRUE
     mod <- withCallingHandlers(
       tryCatch(
-        mgcv::bam(
-          formula,
-          data     = df,
-          family   = mgcv::nb(),
-          method   = "fREML",
-          discrete = TRUE,
-          knots    = time_knots,
-          gamma    = log(nrow(df)) / 2,   # BIC-like penalty; ~6.4 at current scope
-          select   = select
-        ),
-        error = function(e) {
-          converged <<- FALSE
-          NULL
-        }
+        if (discrete_) {
+          mgcv::bam(formula, data = df, family = mgcv::nb(),
+                    method = "fREML", discrete = TRUE,
+                    knots = time_knots, gamma = gamma_val,
+                    select = select_)
+        } else {
+          mgcv::bam(formula, data = df, family = mgcv::nb(),
+                    method = "fREML", discrete = FALSE,
+                    knots = time_knots, gamma = gamma_val,
+                    nthreads = 1L)
+        },
+        error = function(e) { converged <<- FALSE; NULL }
       ),
       warning = function(w) {
         if (grepl("did not converge", conditionMessage(w), fixed = TRUE)) {
@@ -114,27 +128,21 @@ fit_gam <- function(df) {
     list(mod = mod, converged = converged)
   }
 
-  res <- fit_bam(select = TRUE)
-
-  if (!res$converged || is.null(res$mod)) {
-    message("  Attempt 1 (select=TRUE) did not converge; ",
-            "retrying without term selection.")
-    res <- fit_bam(select = FALSE)
-  }
-
-  if (!res$converged || is.null(res$mod)) {
-    message("  Attempt 2 (select=FALSE) did not converge; ",
-            "retrying with discrete=FALSE.")
-    res$mod <- mgcv::bam(
-      formula,
-      data     = df,
-      family   = mgcv::nb(),
-      method   = "fREML",
-      discrete = FALSE,
-      knots    = time_knots,
-      gamma    = log(nrow(df)) / 2,   # BIC-like penalty; ~6.4 at current scope
-      nthreads = 1L
-    )
+  res <- list(mod = NULL, converged = FALSE)
+  for (i in seq_along(attempts)) {
+    a <- attempts[[i]]
+    if (i == 1L) {
+      message(sprintf("  Trying %s ...", a$label))
+    } else {
+      message(sprintf("  Previous attempt failed; retrying with %s.",
+                      a$label))
+    }
+    res <- fit_bam(a$gamma, a$select, a$discrete)
+    if (res$converged && !is.null(res$mod)) {
+      if (i > 1L)
+        message(sprintf("  Converged at %s", a$label))
+      break
+    }
   }
 
   mod <- res$mod
