@@ -96,7 +96,7 @@ fit_gam <- function(df) {
           method   = "fREML",
           discrete = TRUE,
           knots    = time_knots,
-          gamma    = 1.4,
+          gamma    = log(nrow(df)) / 2,   # BIC-like penalty; ~6.4 at current scope
           select   = select
         ),
         error = function(e) {
@@ -132,7 +132,7 @@ fit_gam <- function(df) {
       method   = "fREML",
       discrete = FALSE,
       knots    = time_knots,
-      gamma    = 1.4,
+      gamma    = log(nrow(df)) / 2,   # BIC-like penalty; ~6.4 at current scope
       nthreads = 1L
     )
   }

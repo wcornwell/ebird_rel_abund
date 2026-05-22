@@ -442,7 +442,9 @@ safe_full_fit <- function(df, formula) {
   tryCatch(
     mgcv::bam(formula, data = df, family = mgcv::nb(),
               method = "fREML", discrete = TRUE,
-              knots = time_knots, gamma = 1.4, select = TRUE),
+              knots = time_knots,
+              gamma = log(nrow(df)) / 2,   # BIC-like; match production fit_gam()
+              select = TRUE),
     error = function(e) NULL
   )
 }
