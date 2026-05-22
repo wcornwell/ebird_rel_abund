@@ -1,0 +1,45 @@
+Gamma sweep — full evaluation
+================================================================
+Species: 19   Gammas: 1.4, 6.4   Folds: 5   Seed: 42
+Source CSV: gamma_sweep/full/per_species_metrics.csv
+
+Mean metrics across 19 species
+----------------------------------------------------------------
+  gamma  Spearman   Pearson      MAE     RMSE   DevExpl
+   1.40   0.35662   0.34966   0.9845   2.4828   0.40161
+   6.40   0.35625   0.35093   0.9821   2.4629   0.39985
+
+Paired Wilcoxon signed-rank (two-sided)
+----------------------------------------------------------------
+  spearman_r        p = 0.0001    (BIC worse)
+  pearson_r         p = 0.0799
+  mae               p = 0.0020    (BIC better)
+  rmse              p = 0.0001    (BIC better)
+  holdout_dev_expl  p = 0.0002    (BIC worse)
+
+Win / loss / tie counts (BIC=6.4 moves in the better direction)
+----------------------------------------------------------------
+  spearman_r         wins= 1   losses=16   ties= 2     mean Δ = -0.00038
+  pearson_r          wins=13   losses= 6   ties= 0     mean Δ = +0.00127
+  mae                wins=14   losses= 3   ties= 2     mean Δ = -0.00240
+  rmse               wins=16   losses= 3   ties= 0     mean Δ = -0.01993
+  holdout_dev_expl   wins= 1   losses=18   ties= 0     mean Δ = -0.00177
+
+Interpretation
+----------------------------------------------------------------
+- RMSE / MAE: BIC penalty wins broadly. The biggest absolute
+  RMSE reductions are in low-n species where over-flexibility
+  in the tail predictions is the main failure mode:
+    Flame Robin     (n_pos=4020)   ΔRMSE = -0.266
+    Stubble Quail   (n_pos=2005)   ΔRMSE = -0.048
+    Rainbow Lorikeet(n_pos=105k)   ΔRMSE = -0.015
+- Spearman / holdout deviance: BIC penalty loses on almost
+  every species, but the magnitudes are tiny (4th decimal).
+  Reads as the penalty very slightly shrinking signal that
+  carried real rank information.
+- Pearson: marginal positive on average; not significant at
+  the species-pair level (p=0.08).
+
+Convention: 'win' = gamma=6.4 moved in the better direction
+vs gamma=1.4 (higher Spearman/Pearson/DevExpl, lower MAE/RMSE).
+Ties within 1e-4 of zero.

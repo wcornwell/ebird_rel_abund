@@ -16,6 +16,9 @@
 #'   row to a fold (values in `1..k`). When supplied, `seed` and the internal
 #'   random assignment are skipped — enabling paired CV across two formulas on
 #'   the same data (e.g. baseline vs. covariate variant).
+#' @param gamma Complexity multiplier passed to `mgcv::bam()`. Default `1.4`
+#'   matches `fit_gam()`. Set higher (e.g. `2`–`6.4`) to force smoother fits
+#'   when sweeping the penalty strength; `log(n)/2` ≈ BIC-like behaviour.
 #'
 #' @return A list with:
 #' \describe{
@@ -37,7 +40,7 @@
 #'
 #' @export
 evaluate_model_cv <- function(df, formula = NULL, k = 5L, seed = 42L,
-                              fold_ids = NULL) {
+                              fold_ids = NULL, gamma = 1.4) {
   k <- as.integer(k)
   if (k < 2L || k > nrow(df))
     stop("`k` must be between 2 and nrow(df).")
@@ -91,7 +94,7 @@ evaluate_model_cv <- function(df, formula = NULL, k = 5L, seed = 42L,
         method   = "fREML",
         discrete = TRUE,
         knots    = time_knots,
-        gamma    = 1.4,
+        gamma    = gamma,
         select   = TRUE
       ),
       error = function(e) {
