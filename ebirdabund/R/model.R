@@ -5,28 +5,52 @@ safe_k <- function(x, default_k) {
   as.integer(min(default_k, max(3L, n_uniq - 1L)))
 }
 # Build a GAM formula with data-driven k for each smooth term.
-build_gam_formula <- function(df, hab_cols) {
+build_gam_formula <- function(df, hab_cols, simple = FALSE) {
   sk <- function(var, k) safe_k(df[[var]], k)
-  effort_terms <- c(
-    sprintf("s(day_of_year, bs = 'cc', k = %d)",
-            sk("day_of_year", 10L)),
-    sprintf("s(time_observations_started, bs = 'cc', k = %d)",
-            sk("time_observations_started", 10L)),
-    sprintf("s(log(duration_minutes), k = %d)",
-            sk("duration_minutes", 4L)),
-    sprintf("s(log1p(effort_distance_km), k = %d)",
-            sk("effort_distance_km", 4L)),
-    sprintf("s(number_observers, k = %d)",
-            sk("number_observers", 4L)),
-    "protocol_type"
-  )
+
+  if (isTRUE(simple)) {
+    effort_terms <- c(
+      sprintf("s(day_of_year, bs = 'cc', k = %d)",
+              sk("day_of_year", 6L)),
+      sprintf("s(time_observations_started, bs = 'cc', k = %d)",
+              sk("time_observations_started", 6L)),
+      sprintf("s(log(duration_minutes), k = %d)",
+              sk("duration_minutes", 3L)),
+      sprintf("s(log1p(effort_distance_km), k = %d)",
+              sk("effort_distance_km", 3L)),
+      sprintf("s(number_observers, k = %d)",
+              sk("number_observers", 3L)),
+      "protocol_type"
+    )
+    hab_cols <- intersect(
+      hab_cols,
+      c("lc_trees", "lc_grassland", "lc_cropland", "lc_built",
+        "elevation", "precip_annual", "temp_annual", "water_occ",
+        "tree_height")
+    )
+  } else {
+    effort_terms <- c(
+      sprintf("s(day_of_year, bs = 'cc', k = %d)",
+              sk("day_of_year", 10L)),
+      sprintf("s(time_observations_started, bs = 'cc', k = %d)",
+              sk("time_observations_started", 10L)),
+      sprintf("s(log(duration_minutes), k = %d)",
+              sk("duration_minutes", 4L)),
+      sprintf("s(log1p(effort_distance_km), k = %d)",
+              sk("effort_distance_km", 4L)),
+      sprintf("s(number_observers, k = %d)",
+              sk("number_observers", 4L)),
+      "protocol_type"
+    )
+  }
 
   # Observer-skill term. We use a continuous per-observer expertise score
   # computed once by a Stage 1 calibration GAM (see
   # build_observer_expertise.R) following Kelling et al. (2015) and
   # Johnston et al. (2021). At prediction time we predict at the median score
   # so values represent the population-average observer.
-  if ("observer_expertise" %in% names(df) &&
+  if (!isTRUE(simple) &&
+      "observer_expertise" %in% names(df) &&
       length(unique(stats::na.omit(df$observer_expertise))) >= 5L) {
     effort_terms <- c(effort_terms,
                       sprintf("s(observer_expertise, k = %d)",
@@ -43,7 +67,7 @@ build_gam_formula <- function(df, hab_cols) {
     var <- if (col %in% log1p_cols) sprintf("log1p(%s)", col)
            else if (col %in% log_cols) sprintf("log(%s)", col)
            else col
-    k   <- if (col %in% k6_cols) 6L else 4L
+    k   <- if (isTRUE(simple)) 3L else if (col %in% k6_cols) 6L else 4L
     sprintf("s(%s, k = %d)", var, safe_k(df[[col]], k))
   }, character(1))
 
@@ -72,7 +96,8 @@ fit_gam <- function(df) {
     length(unique(stats::na.omit(df[[col]]))) >= 4L
   }, logical(1))]
 
-  formula <- build_gam_formula(df, hab_cols)
+  full_formula <- build_gam_formula(df, hab_cols)
+  simple_formula <- build_gam_formula(df, hab_cols, simple = TRUE)
 
   # Set "Traveling Count" as reference level when present, else most common
   protocols <- levels(df$protocol_type)
@@ -86,34 +111,39 @@ fit_gam <- function(df) {
   message("Fitting negative-binomial GAM (", nrow(df), " checklists)...")
 
   # Drop gamma first (theta-MLE NaN in irruption-flock species fixes by
-  # lowering the penalty), then drop select, then drop discrete=TRUE.
+  # lowering the penalty), then drop select. If the full formula is still
+  # ill-conditioned, fall back to a smaller core-habitat formula before using
+  # the slower non-discrete optimizer.
   gamma_bic <- log(nrow(df)) / 2
   attempts <- list(
-    list(gamma = gamma_bic, select = TRUE,  discrete = TRUE,
+    list(formula = full_formula, gamma = gamma_bic, select = TRUE,  discrete = TRUE,
          label = sprintf("gamma=%.2f (BIC)", gamma_bic)),
-    list(gamma = 2.0,       select = TRUE,  discrete = TRUE,
+    list(formula = full_formula, gamma = 2.0,       select = TRUE,  discrete = TRUE,
          label = "gamma=2.0"),
-    list(gamma = 1.4,       select = TRUE,  discrete = TRUE,
+    list(formula = full_formula, gamma = 1.4,       select = TRUE,  discrete = TRUE,
          label = "gamma=1.4"),
-    list(gamma = 1.4,       select = FALSE, discrete = TRUE,
+    list(formula = full_formula, gamma = 1.4,       select = FALSE, discrete = TRUE,
          label = "gamma=1.4, select=FALSE"),
-    list(gamma = 1.4,       select = TRUE,  discrete = FALSE,
-         label = "gamma=1.4, discrete=FALSE")
+    list(formula = simple_formula, gamma = 1.4,     select = FALSE, discrete = TRUE,
+         label = "simplified formula, gamma=1.4, select=FALSE"),
+    list(formula = simple_formula, gamma = 1.4,     select = FALSE, discrete = FALSE,
+         label = "simplified formula, gamma=1.4, discrete=FALSE")
   )
 
-  fit_bam <- function(gamma_val, select_, discrete_) {
+  fit_bam <- function(formula_, gamma_val, select_, discrete_) {
     converged <- TRUE
     mod <- withCallingHandlers(
       tryCatch(
         if (discrete_) {
-          mgcv::bam(formula, data = df, family = mgcv::nb(),
+          mgcv::bam(formula_, data = df, family = mgcv::nb(),
                     method = "fREML", discrete = TRUE,
                     knots = time_knots, gamma = gamma_val,
                     select = select_)
         } else {
-          mgcv::bam(formula, data = df, family = mgcv::nb(),
+          mgcv::bam(formula_, data = df, family = mgcv::nb(),
                     method = "fREML", discrete = FALSE,
                     knots = time_knots, gamma = gamma_val,
+                    select = select_,
                     nthreads = 1L)
         },
         error = function(e) { converged <<- FALSE; NULL }
@@ -137,7 +167,7 @@ fit_gam <- function(df) {
       message(sprintf("  Previous attempt failed; retrying with %s.",
                       a$label))
     }
-    res <- fit_bam(a$gamma, a$select, a$discrete)
+    res <- fit_bam(a$formula, a$gamma, a$select, a$discrete)
     if (res$converged && !is.null(res$mod)) {
       if (i > 1L)
         message(sprintf("  Converged at %s", a$label))
@@ -146,6 +176,9 @@ fit_gam <- function(df) {
   }
 
   mod <- res$mod
+  if (is.null(mod)) {
+    stop("GAM fitting failed after all fallback attempts.")
+  }
   print_predictor_importance(mod)
   mod
 }
