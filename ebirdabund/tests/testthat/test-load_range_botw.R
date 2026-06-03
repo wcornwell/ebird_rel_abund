@@ -18,6 +18,34 @@ make_test_botw <- function() {
   path
 }
 
+test_that("load_range_botw keeps all seasonal codes (passage + uncertain)", {
+  # Nomadic/passage species carry coastal or eastern occurrence in passage=4
+  # and uncertain=5 polygons; the filter must keep seasonal 1-5 so they are not
+  # clipped mid-range (cf. Red-necked Avocet, truncated at 147E by the old
+  # seasonal IN (1,2,3) filter).
+  geom <- sf::st_sfc(
+    sf::st_polygon(list(rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 1), c(0, 0)))),
+    sf::st_polygon(list(rbind(c(2, 0), c(3, 0), c(3, 1), c(2, 1), c(2, 0)))),
+    crs = 4326
+  )
+  rows <- sf::st_sf(
+    sci_name = c("Recurvirostra novaehollandiae", "Recurvirostra novaehollandiae"),
+    presence = c(1L, 1L),
+    origin   = c(1L, 1L),
+    seasonal = c(1L, 5L),          # resident core + uncertain coastal extension
+    geometry = geom
+  )
+  path <- tempfile(fileext = ".gpkg")
+  sf::st_write(rows, path, layer = "all_species", quiet = TRUE)
+  on.exit(unlink(path), add = TRUE)
+
+  r <- ebirdabund:::load_range_botw("Recurvirostra novaehollandiae", path,
+                                    aliases = NULL)
+  expect_s3_class(r, "sf")
+  expect_equal(nrow(r), 2L)                          # both polygons kept
+  expect_equal(unname(sf::st_bbox(r)[["xmax"]]), 3)  # reaches the eastern part
+})
+
 test_that("load_range_botw with NULL aliases preserves prior behaviour", {
   botw <- make_test_botw()
   on.exit(unlink(botw), add = TRUE)

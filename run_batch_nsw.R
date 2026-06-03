@@ -115,8 +115,26 @@ polygon    <- sf::st_transform(
 )
 study_bbox <- as.numeric(sf::st_bbox(polygon))
 
+# Prediction polygon: same as `polygon` but with Lord Howe Island (and Ball's
+# Pyramid) removed. They are administratively part of NSW but sit ~600 km
+# offshore (~159°E); after the 100 km training buffer they survive as an
+# isolated circle that attracts spurious predictions (e.g. Red-necked Avocet
+# showing abundance out there). We drop them from the *prediction* polygon only
+# — `polygon` (full bbox) still drives covariate extraction and the sampling
+# master, so the bbox-keyed covariate / CHMv2 / PALSAR caches stay valid.
+# Mainland NSW reaches only ~153.6°E (Cape Byron), so a 155°E cutoff cleanly
+# separates the offshore parts.
+region_parts <- sf::st_cast(sf::st_geometry(region_sf), "POLYGON", warn = FALSE)
+part_xmax    <- vapply(region_parts,
+                       function(g) sf::st_bbox(g)[["xmax"]], numeric(1))
+region_main  <- sf::st_union(region_parts[part_xmax < 155])
+polygon_pred <- sf::st_transform(
+  sf::st_buffer(sf::st_transform(region_main, PROJ_PROCESSING), STUDY_BBOX_BUFFER_M),
+  PROJ_OUTPUT
+)
+
 # Export an unbuffered, lat-lon boundary for plotting overlays (used as 'border')
-nsw <- sf::st_transform(region_sf, 4326)
+nsw <- sf::st_transform(region_main, 4326)
 
 # ── Skip already-completed species ────────────────────────────────────────────
 safe_name_local <- function(x) gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
@@ -338,7 +356,7 @@ if (length(species_list) == 0) {
   t_start <- proc.time()[["elapsed"]]
 
   results <- estimate_abundance_batch(
-    polygon      = polygon,
+    polygon      = polygon_pred,
     ebird_zip    = EBD,
     sampling_txt = SAMP,
     species_list = species_list,

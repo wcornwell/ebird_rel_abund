@@ -102,9 +102,12 @@ load_range_ebirdst <- function(species, resolution) {
 #              record "no BOTW equivalent exists"; avoids a guaranteed-zero
 #              SQL round-trip).
 #
-# Filters to extant/probably-extant (presence 1-2), established populations
-# (origin 1-3, 6; excludes vagrants=4 and uncertain=5), and non-passage
-# seasons (seasonal 1-3; excludes passage=4 and uncertain=5).
+# Filters to extant/probably-extant (presence 1-2) and established populations
+# (origin 1-3, 6; excludes vagrants=4 and uncertain=5). All seasonal codes are
+# kept (1-5: resident/breeding/non-breeding/passage/uncertain): nomadic and
+# passage species (e.g. Red-necked Avocet, jaegers, sand-plovers) carry their
+# coastal/eastern occurrence in passage=4 / uncertain=5 polygons, and excluding
+# those clipped their range mid-NSW or left them unmasked entirely.
 #
 # Returns an sf polygon or NULL if not found.
 load_range_botw <- function(sci_name, botw_path, aliases = NULL) {
@@ -134,7 +137,7 @@ load_range_botw <- function(sci_name, botw_path, aliases = NULL) {
      WHERE sci_name = '%s'
        AND presence IN (1, 2)
        AND origin   IN (1, 2, 3, 6)
-       AND seasonal IN (1, 2, 3)",
+       AND seasonal IN (1, 2, 3, 4, 5)",
     gsub("'", "''", query_name)   # escape any apostrophes in name
   )
 
