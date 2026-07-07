@@ -16,7 +16,7 @@
 "Galah","Eolophus roseicapilla","u273a","Eolophus roseicapilla albiceps",1,1,TRUE,"binomial",FALSE,NA
 "Gray Butcherbird","Cracticus torquatus","u702b;u702c","Cracticus torquatus torquatus;Cracticus torquatus leucopterus",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Crested Pigeon","Ocyphaps lophotes","u43a","Ocyphaps lophotes lophotes",1,1,TRUE,"binomial",FALSE,NA
-"Australian Ibis","Threskiornis molucca",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Australian Ibis","Threskiornis molucca","u179","Threskiornis moluccus moluccus",1,1,TRUE,"alias",FALSE,NA
 "Red Wattlebird","Anthochaera carunculata","u638a;u638c","Anthochaera carunculata carunculata;Anthochaera carunculata woodwardi",2,1,TRUE,"binomial",FALSE,NA
 "Lewin's Honeyeater","Meliphaga lewinii","u605b","Meliphaga lewinii lewinii",1,1,TRUE,"binomial",FALSE,NA
 "Maned Duck","Chenonetta jubata","u202","Chenonetta jubata",1,1,TRUE,"binomial",FALSE,NA
@@ -42,7 +42,7 @@
 "Eurasian Coot","Fulica atra","u59","Fulica atra australis",1,1,TRUE,"binomial",FALSE,NA
 "Golden Whistler","Pachycephala pectoralis","u398d;u398g","Pachycephala pectoralis pectoralis;Pachycephala pectoralis youngi",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Australian Pelican","Pelecanus conspicillatus","u106","Pelecanus conspicillatus",1,1,TRUE,"binomial",FALSE,NA
-"Australasian Swamphen","Porphyrio melanotus",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Australasian Swamphen","Porphyrio melanotus","u58b","Porphyrio porphyrio melanotus",1,1,TRUE,"alias",FALSE,NA
 "White-throated Treecreeper","Cormobates leucophaea","u558c;u558d","Cormobates leucophaea leucophaea;Cormobates leucophaea metastasis",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Spotted Dove","Spilopelia chinensis",NA,NA,0,0,FALSE,"none",FALSE,NA
 "Spotted Pardalote","Pardalotus punctatus","u565b;u565c","Pardalotus punctatus punctatus;Pardalotus punctatus xanthopyge",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
@@ -95,11 +95,11 @@
 "Mistletoebird","Dicaeum hirundinaceum","u564","Dicaeum hirundinaceum",1,1,TRUE,"binomial",FALSE,NA
 "Australian Brushturkey","Alectura lathami","u8a","Alectura lathami lathami",1,1,TRUE,"binomial",FALSE,NA
 "Dollarbird","Eurystomus orientalis","u318","Eurystomus orientalis pacificus",1,1,TRUE,"binomial",FALSE,NA
-"Eastern Cattle-Egret","Ardea coromanda",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Eastern Cattle-Egret","Ardea coromanda","u977","Bubulcus ibis coromandus",1,1,TRUE,"alias",FALSE,NA
 "Pied Stilt","Himantopus leucocephalus","u146","Himantopus leucocephalus",1,1,TRUE,"binomial",FALSE,NA
 "Bell Miner","Manorina melanophrys","u633","Manorina melanophrys",1,1,TRUE,"binomial",FALSE,NA
 "Brown Cuckoo-Dove","Macropygia phasianella","u29a","Macropygia phasianella phasianella",1,1,TRUE,"binomial",FALSE,NA
-"Musk Lorikeet","Trichoglossus concinnus",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Musk Lorikeet","Trichoglossus concinnus","u258a","Glossopsitta concinna concinna",1,1,TRUE,"alias",FALSE,NA
 "Pied Oystercatcher","Haematopus longirostris","u130","Haematopus longirostris",1,1,TRUE,"binomial",FALSE,NA
 "Wonga Pigeon","Leucosarcia melanoleuca","u44","Leucosarcia melanoleuca",1,1,TRUE,"binomial",FALSE,NA
 "Brown Honeyeater","Lichmera indistincta","u597c","Lichmera indistincta ocularis",1,1,TRUE,"binomial",FALSE,NA
@@ -129,7 +129,7 @@
 "Rainbow Bee-eater","Merops ornatus","u329","Merops ornatus",1,1,TRUE,"binomial",FALSE,NA
 "Osprey","Pandion haliaetus","u241a","Pandion haliaetus cristatus",1,1,TRUE,"binomial",FALSE,NA
 "Black-faced Monarch","Monarcha melanopsis","u373","Monarcha melanopsis",1,1,TRUE,"binomial",FALSE,NA
-"Australian Pipit","Anthus australis",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Australian Pipit","Anthus australis","u647a","Anthus novaeseelandiae australis",1,1,TRUE,"alias",FALSE,NA
 "Wedge-tailed Eagle","Aquila audax","u224a","Aquila audax audax",1,1,TRUE,"binomial",FALSE,NA
 "Dusky Woodswallow","Artamus cyanopterus","u547a","Artamus cyanopterus cyanopterus",1,1,TRUE,"binomial",FALSE,NA
 "Sooty Oystercatcher","Haematopus fuliginosus","u131a","Haematopus fuliginosus fuliginosus",1,1,TRUE,"binomial",FALSE,NA
@@ -300,7 +300,7 @@
 "Forest Kingfisher","Todiramphus macleayii","u324a","Todiramphus macleayii incinctus",1,1,TRUE,"binomial",FALSE,NA
 "Russet-tailed Thrush","Zoothera heinei","u780","Zoothera heinei heinei",1,1,TRUE,"binomial",FALSE,NA
 "Black-necked Stork","Ephippiorhynchus asiaticus","u183","Ephippiorhynchus asiaticus australis",1,1,TRUE,"binomial",FALSE,NA
-"Chestnut-rumped Heathwren","Hylacola pyrrhopygia",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Chestnut-rumped Heathwren","Hylacola pyrrhopygia","u498c","Calamanthus pyrrhopygius pyrrhopygius",1,1,TRUE,"alias",FALSE,NA
 "Sanderling","Calidris alba","u166","Calidris alba alba",1,1,TRUE,"binomial",FALSE,NA
 "White-fronted Honeyeater","Purnella albifrons","u594","Purnella albifrons",1,1,TRUE,"binomial",FALSE,NA
 "Short-tailed Shearwater","Ardenna tenuirostris","u71","Ardenna tenuirostris",1,1,TRUE,"binomial",FALSE,NA
@@ -371,7 +371,7 @@
 "Chestnut Quail-thrush","Cinclosoma castanotum","u437a","Cinclosoma castanotum castanotum",1,1,TRUE,"binomial",FALSE,NA
 "Australasian Bittern","Botaurus poiciloptilus","u197","Botaurus poiciloptilus",1,1,TRUE,"binomial",FALSE,NA
 "Black-backed Bittern","Botaurus dubius","u195","Ixobrychus dubius",1,1,TRUE,"alias",FALSE,NA
-"Shy Heathwren","Hylacola cauta",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Shy Heathwren","Hylacola cauta","u499a;u499c","Calamanthus cautus cautus;Calamanthus cautus macrorhynchus",2,2,TRUE,"alias",TRUE,"multiple_nsw_subspecies"
 "Brown Noddy","Anous stolidus","u122","Anous stolidus pileatus",1,1,TRUE,"binomial",FALSE,NA
 "Albert's Lyrebird","Menura alberti","u351","Menura alberti",1,1,TRUE,"binomial",FALSE,NA
 "Blue-breasted Quail","Synoicus chinensis","u12b","Synoicus chinensis victoriae",1,1,TRUE,"binomial",FALSE,NA
