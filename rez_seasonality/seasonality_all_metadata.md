@@ -22,6 +22,8 @@ trained on eBird data from NSW, ACT, VIC, QLD, SA.
 | **Habitat covariates** (ESA WorldCover, SRTM, WorldClim, WorldPop, JRC water, SoilGrids, Meta/WRI CHMv2 canopy, Falchi nightlights, ALOS‑2 PALSAR‑2) | Habitat terms in the GAM; held at region means when predicting seasonal curves | see project `CLAUDE.md` |
 | **AVONET** (eBird taxonomy sheet) | `migration`, `feeding_guild`, `trophic_level`, `primary_lifestyle` | Tobias et al. 2022, *Ecol. Lett.* 25:581 |
 | **EltonTraits 1.0** | `foraging_stratum` (dominant vertical foraging stratum) | Wilman et al. 2014, *Ecology* 95:2027 |
+| **Garnett Australian Bird Data v1.0** (Australia-specific, subspecies-level) | `epbc_status`, `nsw_status`, `garnett_movement` — fills natives the WLAB subset omits (e.g. White-faced Heron) | Garnett et al. 2015, *Sci. Data* 2:150061 |
+| **BIRDBASE** (2024 taxonomy) | `iucn_status` (2024 IUCN), `habitat_breadth` | Şekercioğlu et al. 2025, *Sci. Data* |
 | **Reid/Baker NSW bird-risk working list (WLAB)** | `risk_assessed`, `wlab_taxon_id`, `wlab_scientificname`, `wlab_review*` | `taxonomy/reidbaker_bird_risk_NSW_species.csv` (+ `reidbaker_name_aliases.csv` for genus reshuffles) |
 | **Abundance surfaces** (per-species negative-binomial GAM predictions, 3 km) | `mean_abund`, `se_abund` | project pipeline (`run_batch_nsw.R`) |
 | **eBird Status & Trends 2023 ranges / BirdLife BOTW 2025** | Range masking of the abundance surfaces | ebirdst 2023; BirdLife/HBW BOTW 2025 |
@@ -111,31 +113,36 @@ an English-name fallback. WLAB crosswalk built by `ebirdabund/R/taxonomy.R`.
 | 5 | `risk_assessed` | logical | TRUE if the species is present in the WLAB working list (which covers common species too — *not* a "threatened" flag) | WLAB crosswalk (+ genus-reshuffle aliases) |
 | 6 | `wlab_review` | logical | Flags a mapping needing manual review | `build_taxonomy_crosswalk()` |
 | 7 | `wlab_review_reason` | chr | `multiple_nsw_subspecies` (species lumps ≥2 NSW subspecies) else NA | WLAB crosswalk |
-| 8 | `migration` | chr | `Sedentary` / `Partial migrant` / `Migratory` | AVONET `Migration` (1/2/3) |
-| 9 | `feeding_guild` | chr | Trophic niche (e.g. Invertivore, Aquatic predator, Granivore, Omnivore, Nectarivore, Frugivore, Vertivore, Herbivore) | AVONET `Trophic.Niche` |
-| 10 | `trophic_level` | chr | Carnivore / Herbivore / Omnivore / Scavenger | AVONET `Trophic.Level` |
-| 11 | `primary_lifestyle` | chr | Aerial / Aquatic / Insessorial / Terrestrial / Generalist | AVONET `Primary.Lifestyle` |
-| 12 | `foraging_stratum` | chr | Dominant vertical stratum (ground, understory, mid-high, canopy, aerial, around/below-water, pelagic) | EltonTraits `ForStrat-*` argmax |
-| 13 | `rez` | chr | Region: `statewide`, `central_west` (Central-West Orana), `new_england`, `south_west` | REZ polygon membership |
-| 14 | `n_checklists_rez` | int | Sub-sampled checklists in the region | eBird (post hex sub-sample) |
-| 15 | `n_positive_rez` | int | Of those, checklists with a detection | eBird |
-| 16 | `sufficient` | logical | `n_positive_rez ≥ 20` (seasonality gate) | — |
-| 17 | `seasonality_index` | num | 1 − trough/peak ∈ [0,1]; higher = more seasonal | posterior simulation |
-| 18 | `amplitude_link` | num | Peak−trough of the seasonal curve on the log/link scale | posterior simulation |
-| 19 | `peak_doy` | int | Day-of-year of peak standardised detection | argmax of posterior-median curve |
-| 20 | `peak_date` | chr | `peak_doy` as a calendar date | — |
-| 21 | `prob_seasonal` | num | Posterior P(peak ≥ 2× trough) | posterior simulation |
-| 22 | `is_seasonal` | logical | `sufficient` AND `prob_seasonal ≥ 0.95` | — |
-| 23 | `window_start_doy` | int | Start of the seasonal window (≥ annual-mean detection); NA unless seasonal | posterior-median curve |
-| 24 | `window_end_doy` | int | End of the seasonal window | — |
-| 25 | `window_start_date` | chr | `window_start_doy` as a date | — |
-| 26 | `window_end_date` | chr | `window_end_doy` as a date | — |
-| 27 | `window_wraps` | logical | TRUE if the window crosses the year boundary (Dec→Jan) | — |
-| 28 | `mean_abund` | num | Mean predicted relative abundance in the region (range-masked NAs = 0) | abundance stack |
-| 29 | `se_abund` | num | Mean model SE over predicted cells (log scale) | abundance SE stack |
-| 30 | `n_train_total` | int | Sub-sampled checklists used to fit the species' GAM | eBird |
-| 31 | `dev_expl` | num | Deviance explained by the fitted GAM | `mgcv` summary / NB fallback |
-| 32 | `run_date` | chr | Date the row was generated | — |
+| 8 | `migration` | chr | `Sedentary` / `Partial migrant` / `Migratory` (global) | AVONET `Migration` (1/2/3) |
+| 9 | `garnett_movement` | chr | Australia-specific movement flags, `;`-joined: local dispersal / partial migrant / total migrant / nomadic / irruptive (else `sedentary`). Catches nomadism AVONET flattens | Garnett `National_movement_*` |
+| 10 | `feeding_guild` | chr | Trophic niche (e.g. Invertivore, Aquatic predator, Granivore, Omnivore, Nectarivore, Frugivore, Vertivore, Herbivore) | AVONET `Trophic.Niche` |
+| 11 | `trophic_level` | chr | Carnivore / Herbivore / Omnivore / Scavenger | AVONET `Trophic.Level` |
+| 12 | `primary_lifestyle` | chr | Aerial / Aquatic / Insessorial / Terrestrial / Generalist | AVONET `Primary.Lifestyle` |
+| 13 | `foraging_stratum` | chr | Dominant vertical stratum (ground, understory, mid-high, canopy, aerial, around/below-water, pelagic) | EltonTraits `ForStrat-*` argmax |
+| 14 | `habitat_breadth` | num | Number of habitat types used (displacement-risk proxy) | BIRDBASE `HB` |
+| 15 | `iucn_status` | chr | 2024 IUCN Red List category (LC/NT/VU/EN/CR/…) | BIRDBASE |
+| 16 | `epbc_status` | chr | Australian EPBC Act status (CR/EN/VU/EX/not listed); most-threatened across the species' taxa | Garnett `EPBC_Status_July_2015` |
+| 17 | `nsw_status` | chr | NSW listing (CR/EN/VU/EX/EN (population)/not listed) | Garnett `NSW_status_2015` |
+| 18 | `rez` | chr | Region: `statewide`, `central_west` (Central-West Orana), `new_england`, `south_west` | REZ polygon membership |
+| 19 | `n_checklists_rez` | int | Sub-sampled checklists in the region | eBird (post hex sub-sample) |
+| 20 | `n_positive_rez` | int | Of those, checklists with a detection | eBird |
+| 21 | `sufficient` | logical | `n_positive_rez ≥ 20` (seasonality gate) | — |
+| 22 | `seasonality_index` | num | 1 − trough/peak ∈ [0,1]; higher = more seasonal | posterior simulation |
+| 23 | `amplitude_link` | num | Peak−trough of the seasonal curve on the log/link scale | posterior simulation |
+| 24 | `peak_doy` | int | Day-of-year of peak standardised detection | argmax of posterior-median curve |
+| 25 | `peak_date` | chr | `peak_doy` as a calendar date | — |
+| 26 | `prob_seasonal` | num | Posterior P(peak ≥ 2× trough) | posterior simulation |
+| 27 | `is_seasonal` | logical | `sufficient` AND `prob_seasonal ≥ 0.95` | — |
+| 28 | `window_start_doy` | int | Start of the seasonal window (≥ annual-mean detection); NA unless seasonal | posterior-median curve |
+| 29 | `window_end_doy` | int | End of the seasonal window | — |
+| 30 | `window_start_date` | chr | `window_start_doy` as a date | — |
+| 31 | `window_end_date` | chr | `window_end_doy` as a date | — |
+| 32 | `window_wraps` | logical | TRUE if the window crosses the year boundary (Dec→Jan) | — |
+| 33 | `mean_abund` | num | Mean predicted relative abundance in the region (range-masked NAs = 0) | abundance stack |
+| 34 | `se_abund` | num | Mean model SE over predicted cells (log scale) | abundance SE stack |
+| 35 | `n_train_total` | int | Sub-sampled checklists used to fit the species' GAM | eBird |
+| 36 | `dev_expl` | num | Deviance explained by the fitted GAM | `mgcv` summary / NB fallback |
+| 37 | `run_date` | chr | Date the row was generated | — |
 
 ---
 
@@ -143,6 +150,8 @@ an English-name fallback. WLAB crosswalk built by `ebirdabund/R/taxonomy.R`.
 - Sullivan, B.L. et al. (2009) eBird: a citizen-based bird observation network. *Biol. Conserv.* 142:2282.
 - Tobias, J.A. et al. (2022) AVONET: morphological, ecological and geographical data for all birds. *Ecol. Lett.* 25:581.
 - Wilman, H. et al. (2014) EltonTraits 1.0: species-level foraging attributes of the world's birds and mammals. *Ecology* 95:2027.
+- Garnett, S.T. et al. (2015) Biological, ecological, conservation and legal information for all species and subspecies of Australian bird. *Scientific Data* 2:150061.
+- Şekercioğlu, Ç.H. et al. (2025) BIRDBASE: A global dataset of avian biogeography, conservation, ecology and life history traits. *Scientific Data*.
 - Kelling, S. et al. (2015) Can observation skills of citizen scientists be estimated using species accumulation curves? *PLoS ONE* 10:e0139600.
 - Johnston, A. et al. (2021) Analytical guidelines to increase the value of community science data. *Divers. Distrib.* 27:1265.
 - BirdLife International & HBW (2025) *Bird species distribution maps of the world* (BOTW 2025).

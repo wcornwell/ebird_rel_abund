@@ -9,8 +9,9 @@ TRAITS <- "taxonomy/species_traits.csv"
 d <- read.csv(SEAS, stringsAsFactors = FALSE, check.names = FALSE)
 t <- read.csv(TRAITS, stringsAsFactors = FALSE)
 
-trait_cols <- c("migration", "feeding_guild", "trophic_level",
-                "primary_lifestyle", "foraging_stratum")
+trait_cols <- c("migration", "garnett_movement", "feeding_guild", "trophic_level",
+                "primary_lifestyle", "foraging_stratum", "habitat_breadth",
+                "iucn_status", "epbc_status", "nsw_status")
 d <- d[, setdiff(names(d), trait_cols)]         # idempotent: drop if re-run
 i <- match(d$common_name, t$common_name)
 add <- t[i, trait_cols]
