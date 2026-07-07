@@ -8,6 +8,8 @@ suppressPackageStartupMessages({
 STACK_PATH <- "species_maps/nsw_abundance_stack_3km.tif"
 SE_PATH    <- "species_maps/nsw_abundance_se_stack_3km.tif"
 REZ_PATH   <- "RenewableEnergyZones_Spatial/RenewableEnergyZones.shp"
+CROSSWALK_PATH <- "taxonomy/species_wlab_crosswalk.csv"
+TRAITS_PATH    <- "taxonomy/species_traits.csv"
 CACHE_DIR  <- "ebirdabund_cache_nsw_buffer"
 OUT_DIR    <- "rez_plots"
 TOP_N      <- 50
@@ -19,6 +21,19 @@ stack    <- rast(STACK_PATH)
 se_stack <- rast(SE_PATH)
 rez      <- st_read(REZ_PATH, quiet = TRUE) |>
   st_transform(crs(stack))
+
+# WLAB taxonomy crosswalk, keyed by layer stem (safe_name of the common name)
+# so it joins cleanly to snake_case raster layer names.
+cw <- read.csv(CROSSWALK_PATH, stringsAsFactors = FALSE)
+cw$stem <- gsub("[^a-z0-9]+", "_", tolower(trimws(cw$common_name)))
+
+# Species traits (AVONET migration + feeding guild, EltonTraits stratum),
+# keyed the same way. Optional: skip trait columns if the file is absent.
+traits <- if (file.exists(TRAITS_PATH)) {
+  t <- read.csv(TRAITS_PATH, stringsAsFactors = FALSE)
+  t$stem <- gsub("[^a-z0-9]+", "_", tolower(trimws(t$common_name)))
+  t
+} else NULL
 
 # Pretty-print species names from snake_case layer names
 pretty_name <- function(x) {
@@ -149,8 +164,21 @@ for (i in seq_len(nrow(rez))) {
   ggsave(out_path, p, width = 10, height = 14, dpi = 150)
   message(sprintf("    Saved: %s", out_path))
 
+  cw_idx <- match(names(means), cw$stem)
+  tr_idx <- if (!is.null(traits)) match(names(means), traits$stem) else NULL
+  tr_col <- function(col) if (is.null(traits)) NA_character_ else traits[[col]][tr_idx]
   all_df <- data.frame(
     species        = pretty_name(names(means)),
+    common_name    = cw$common_name[cw_idx],
+    scientific_name = cw$scientific_name[cw_idx],
+    wlab_taxon_id  = cw$wlab_taxon_id[cw_idx],
+    risk_listed    = cw$risk_listed[cw_idx],
+    wlab_review    = cw$wlab_review[cw_idx],
+    migration         = tr_col("migration"),
+    feeding_guild     = tr_col("feeding_guild"),
+    trophic_level     = tr_col("trophic_level"),
+    primary_lifestyle = tr_col("primary_lifestyle"),
+    foraging_stratum  = tr_col("foraging_stratum"),
     abundance      = means,
     model_se       = mean_se,
     spatial_cv     = sds / means,

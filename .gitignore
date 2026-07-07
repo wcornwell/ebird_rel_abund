@@ -78,3 +78,10 @@ tree_height_chmv2.png
 # =============================================================================
 .claude/scheduled_tasks.lock
 ebirdabund/memory/
+
+# Downloaded trait source files (large; regenerable via extract_traits.R / extract_migratory.R)
+taxonomy/traits/
+# Seasonality run logs + scratch outputs (keep seasonality_all.csv tracked)
+rez_seasonality/*.log
+rez_seasonality/*.bak*
+rez_seasonality/seasonality_prototype.csv
