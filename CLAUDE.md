@@ -350,3 +350,112 @@ The work needed to add a new region:
 7. Use a separate `zerofill_cache` directory per region in the config (the cache is keyed only by species name, not by polygon, so different regions' caches must not share a directory).
 
 The main bottleneck for larger regions will be RAM and disk: the zerofilled cache scales linearly with species count × checklist count.
+
+---
+
+## REZ Risk-Assessment Layer (seasonality, taxonomy, traits)
+
+Downstream products built on top of the abundance stacks, for a bird collision/
+displacement **risk assessment of NSW Renewable Energy Zones (REZs)**, focused on
+onshore wind. Three deliverables plus a documented data gap.
+
+### 1. Per-REZ seasonality (`rez_seasonality_batch.R`, `ebirdabund/R/seasonality.R`)
+
+Answers "how seasonal is each taxon in each REZ, and if so what's the window?"
+Distinct from the production model's single global `s(day_of_year)` (which is
+spatially constant). Per species, **one** shared NB GAM reuses the production
+effort+habitat structure and adds an **ordered-factor by-REZ cyclic seasonal
+smooth**: reference level `statewide` (rest-of-state) carries the global
+`s(day_of_year)`; each target REZ gets a *difference* smooth, so its curve =
+global + deviation, and sparse REZs shrink toward statewide (`select=TRUE`).
+Regions: `statewide` + 3 target REZs (`central_west` = Central-West Orana,
+`new_england`, `south_west` = Hay). Metrics via **posterior simulation** from
+`vcov(fit)`: `seasonality_index` = 1 − trough/peak ∈ [0,1]; `is_seasonal` =
+(≥20 positive detections) AND P(peak ≥ 2× trough) ≥ 0.95; window = contiguous
+DOY where the standardised curve ≥ its annual mean (cyclic-aware).
+
+- **Output**: `rez_seasonality/seasonality_all.csv` (one row per species × region;
+  551 × 4 = 2204 rows) + `seasonality_all_metadata.md` (full data dictionary +
+  sources + methods — keep it in sync when columns change).
+- **Fit chain is discrete-only**: the non-discrete `bam` fallback took 30+ min
+  per species on ~334k rows and caused apparent "hangs" — it was removed. Chain:
+  full discrete BIC → full discrete γ=1.4 → discrete no-select → simplified
+  formula → fail fast. **Do not re-add a non-discrete fallback.**
+- **Workers**: run at **≤4** (heavier than the abundance fit; 5 hit jetsam
+  deaths). `subsample_hex` draws randomly, so a borderline species can fail on
+  one draw and succeed on a re-run (the script resumes on species not yet in the
+  output CSV).
+- **Caveat**: the model controls for observation *effort* but not for a species'
+  own seasonal *detectability* (breeding-season song/display). Cross-check
+  `is_seasonal` against the migration columns; residents can read as seasonal.
+
+### 2. Taxonomy / WLAB crosswalk (`ebirdabund/R/taxonomy.R`)
+
+`build_taxonomy_crosswalk()` maps modelled species to the Reid/Baker NSW bird
+working list (WLAB, `taxonomy/reidbaker_bird_risk_NSW_species.csv`). Join order:
+binomial → common name → `taxonomy/reidbaker_name_aliases.csv` (genus reshuffles,
+spelling variants, eBird-split-of-WLAB-subspecies). Output
+`taxonomy/species_wlab_crosswalk.csv`; wired into `rez_abundance.R` and the
+seasonality output.
+
+- Column is **`risk_assessed`** (renamed from `risk_listed`) = "present in the
+  WLAB working list", **not** "threatened" — WLAB includes common species.
+- `wlab_review` / `wlab_review_reason = multiple_nsw_subspecies` flags species
+  that lump ≥2 NSW-plausible subspecies (see `DEFAULT_NON_NSW_PATTERNS`); we flag,
+  don't split.
+- **reidbaker is a 493-taxon SUBSET, not a full NSW list.** It genuinely omits
+  many common natives (White-faced Heron, Tree Martin, Brown Falcon, Variegated
+  Fairywren, …). No aliasing recovers them — they are not in the file. ~415/551
+  matched; the rest are introduced species (correctly excluded), rare pelagics
+  (unimportant), or these genuine WLAB gaps. For comprehensive native +
+  conservation coverage, use **Garnett** (below), not reidbaker.
+
+### 3. Species traits (`extract_traits.R` → `taxonomy/species_traits.csv`)
+
+Per-species functional + conservation traits from four external datasets, joined
+by eBird scientific name with per-source alias files. Large source files live in
+`taxonomy/traits/` and are **gitignored** (regenerable by the extract scripts):
+- **AVONET** (Tobias 2022, eBird taxonomy) → `migration` (Sedentary/Partial/
+  Migratory), `feeding_guild` (Trophic.Niche), `trophic_level`,
+  `primary_lifestyle`. Alias file: `taxonomy/avonet_name_aliases.csv` (post-2021
+  genus reshuffles). AVONET is **conservative for Australian nomads** (Pallid
+  Cuckoo coded Sedentary despite spring migration).
+- **EltonTraits 1.0** (Wilman 2014) → `foraging_stratum` (dominant vertical
+  stratum, incl. `pelagic`).
+- **Garnett Australian Bird Data v1.0** (2015, subspecies-level, aggregated to
+  species) → `epbc_status`, `nsw_status` (most-threatened across the species'
+  taxa), `garnett_movement` (local dispersal / partial / total migrant / nomadic
+  / irruptive — catches nomadism AVONET flattens). **Comprehensive Australian
+  coverage** (2056 taxa) — fills the reidbaker gaps.
+- **BIRDBASE** (Şekercioğlu 2025, 2024 taxonomy) → `iucn_status`,
+  `habitat_breadth`.
+
+`extract_migratory.R` writes the intermediate `taxonomy/migratory_status.csv`
+(BOTW seasonal-code proxy; superseded by AVONET/Garnett but kept as an audit
+column `botw_seasonal_codes`). Traits are joined into `seasonality_all.csv` via
+`seasonality_add_traits.R` (idempotent) and into the abundance CSVs by
+`rez_abundance.R`.
+
+### 4. The flight-height gap (do not re-chase)
+
+Wind collision risk = exposure (abundance × seasonal presence, which we have) ×
+vulnerability. The dominant vulnerability term is **% time flying at rotor-blade
+height** — and **no comprehensive species-level flight-height dataset exists**
+for terrestrial Australian birds. What exists: good seabird distributions
+(Johnston 2014 / BTO-Cook, UK marine only); fragmented per-species GPS tracks
+(Movebank, raptors/soaring birds); radar (can't assign to species). Conclusion
+after searching: treat as a structural gap — use an **ecology-based proxy**
+(rotor-height overlap from `foraging_stratum`/`primary_lifestyle`/`feeding_guild`)
++ real tracking only for the few priority soaring/threatened species.
+
+**AVISTEP** (BirdLife Avian Sensitivity Tool for Energy Planning, Australia): the
+download (`avistep/Australia/Australia.gdb`, gitignored) is a **spatial 5 km
+sensitivity map** (`avistep_aus_onshore`, category 1–4), **not** per-species
+scores — those are internal to AVISTEP and not shipped. Rejected as too
+black-box for per-species work, but usable as a REZ-level benchmark: all NSW REZs
+rate High–Very High (New England highest ≈3.84, South West lowest ≈3.24; see the
+overlay in `rez_plots/avistep_rez_sensitivity.csv`).
+
+**Env note**: R was upgraded 4.5→4.6; run under plain `Rscript` (4.6 has the
+needed packages). Do **not** put the 4.5-arm64 library on the path — compiled
+packages are ABI-incompatible across the minor bump.

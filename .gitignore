@@ -85,3 +85,6 @@ taxonomy/traits/
 rez_seasonality/*.log
 rez_seasonality/*.bak*
 rez_seasonality/seasonality_prototype.csv
+
+# AVISTEP geodatabase (large external data, gitignored like botw_species)
+avistep/
