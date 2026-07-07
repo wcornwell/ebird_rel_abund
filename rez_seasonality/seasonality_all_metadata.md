@@ -22,7 +22,7 @@ trained on eBird data from NSW, ACT, VIC, QLD, SA.
 | **Habitat covariates** (ESA WorldCover, SRTM, WorldClim, WorldPop, JRC water, SoilGrids, Meta/WRI CHMv2 canopy, Falchi nightlights, ALOS‑2 PALSAR‑2) | Habitat terms in the GAM; held at region means when predicting seasonal curves | see project `CLAUDE.md` |
 | **AVONET** (eBird taxonomy sheet) | `migration`, `feeding_guild`, `trophic_level`, `primary_lifestyle` | Tobias et al. 2022, *Ecol. Lett.* 25:581 |
 | **EltonTraits 1.0** | `foraging_stratum` (dominant vertical foraging stratum) | Wilman et al. 2014, *Ecology* 95:2027 |
-| **Reid/Baker NSW bird-risk working list (WLAB)** | `risk_listed`, `wlab_taxon_id`, `wlab_scientificname`, `wlab_review*` | `taxonomy/reidbaker_bird_risk_NSW_species.csv` |
+| **Reid/Baker NSW bird-risk working list (WLAB)** | `risk_assessed`, `wlab_taxon_id`, `wlab_scientificname`, `wlab_review*` | `taxonomy/reidbaker_bird_risk_NSW_species.csv` (+ `reidbaker_name_aliases.csv` for genus reshuffles) |
 | **Abundance surfaces** (per-species negative-binomial GAM predictions, 3 km) | `mean_abund`, `se_abund` | project pipeline (`run_batch_nsw.R`) |
 | **eBird Status & Trends 2023 ranges / BirdLife BOTW 2025** | Range masking of the abundance surfaces | ebirdst 2023; BirdLife/HBW BOTW 2025 |
 | **Observer-expertise BLUPs** | Effort term controlling for observer skill | Kelling et al. 2015; Johnston et al. 2021 |
@@ -108,7 +108,7 @@ an English-name fallback. WLAB crosswalk built by `ebirdabund/R/taxonomy.R`.
 | 2 | `scientific_name` | chr | eBird scientific name | `nsw_ebird_taxonomy.csv` |
 | 3 | `wlab_taxon_id` | chr | WLAB taxon ID(s); `;`-joined if the species maps to several subspecies | Reid/Baker WLAB crosswalk |
 | 4 | `wlab_scientificname` | chr | WLAB scientific name(s) matched | WLAB crosswalk |
-| 5 | `risk_listed` | logical | TRUE if the species matches ≥1 WLAB risk taxon | WLAB crosswalk |
+| 5 | `risk_assessed` | logical | TRUE if the species is present in the WLAB working list (which covers common species too — *not* a "threatened" flag) | WLAB crosswalk (+ genus-reshuffle aliases) |
 | 6 | `wlab_review` | logical | Flags a mapping needing manual review | `build_taxonomy_crosswalk()` |
 | 7 | `wlab_review_reason` | chr | `multiple_nsw_subspecies` (species lumps ≥2 NSW subspecies) else NA | WLAB crosswalk |
 | 8 | `migration` | chr | `Sedentary` / `Partial migrant` / `Migratory` | AVONET `Migration` (1/2/3) |

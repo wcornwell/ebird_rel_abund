@@ -1,4 +1,4 @@
-"common_name","scientific_name","wlab_taxon_id","wlab_scientificname","n_wlab_subspecies","n_nsw_subspecies","risk_listed","match_type","wlab_review","wlab_review_reason"
+"common_name","scientific_name","wlab_taxon_id","wlab_scientificname","n_wlab_subspecies","n_nsw_subspecies","risk_assessed","match_type","wlab_review","wlab_review_reason"
 "Australian Magpie","Gymnorhina tibicen","u705f;u705g;u705h","Gymnorhina tibicen terraereginae;Gymnorhina tibicen tibicen;Gymnorhina tibicen tyrannica",3,3,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Rainbow Lorikeet","Trichoglossus moluccanus","u254a","Trichoglossus moluccanus moluccanus",1,1,TRUE,"binomial",FALSE,NA
 "Magpie-lark","Grallina cyanoleuca","u415a","Grallina cyanoleuca cyanoleuca",1,1,TRUE,"binomial",FALSE,NA
@@ -26,7 +26,7 @@
 "Little Pied Cormorant","Microcarbo melanoleucos","u100","Microcarbo melanoleucos melanoleucos",1,1,TRUE,"binomial",FALSE,NA
 "Eastern Whipbird","Psophodes olivaceus","u421b","Psophodes olivaceus olivaceus",1,1,TRUE,"binomial",FALSE,NA
 "Crimson Rosella","Platycercus elegans","u282a;u282c","Platycercus elegans elegans;Platycercus elegans flaveolus",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
-"Silver Gull","Chroicocephalus novaehollandiae",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Silver Gull","Chroicocephalus novaehollandiae","u125","Larus novaehollandiae novaehollandiae",1,1,TRUE,"alias",FALSE,NA
 "Black-faced Cuckooshrike","Coracina novaehollandiae","u424a","Coracina novaehollandiae melanops",1,1,TRUE,"binomial",FALSE,NA
 "Yellow-faced Honeyeater","Caligavis chrysops","u614b","Caligavis chrysops chrysops",1,1,TRUE,"binomial",FALSE,NA
 "Brown Thornbill","Acanthiza pusilla","u475b;u475d","Acanthiza pusilla dawsonensis;Acanthiza pusilla pusilla",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
@@ -136,12 +136,12 @@
 "Bar-tailed Godwit","Limosa lapponica","u153a;u153b;u153c","Limosa lapponica baueri;Limosa lapponica menzbieri;Limosa lapponica anadyrensis",3,3,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Jacky-winter","Microeca fascinans","u377a;u377b;u377c","Microeca fascinans assimilis;Microeca fascinans fascinans;Microeca fascinans pallida",3,3,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Shining Bronze-Cuckoo","Chalcites lucidus","u344a;u344b","Chalcites lucidus lucidus;Chalcites lucidus plagosus",2,1,TRUE,"binomial",FALSE,NA
-"Brown Goshawk","Tachyspiza fasciata",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Brown Goshawk","Tachyspiza fasciata","u221c","Accipiter fasciatus fasciatus",1,1,TRUE,"alias",FALSE,NA
 "Swamp Harrier","Circus approximans","u219","Circus approximans gouldi",1,1,TRUE,"binomial",FALSE,NA
 "Green Catbird","Ailuroedus crassirostris","u676","Ailuroedus crassirostris",1,1,TRUE,"binomial",FALSE,NA
 "Tawny Frogmouth","Podargus strigoides","u313a;u313c","Podargus strigoides brachypterus;Podargus strigoides strigoides",2,1,TRUE,"binomial",FALSE,NA
 "Caspian Tern","Hydroprogne caspia","u112","Hydroprogne caspia",1,1,TRUE,"binomial",FALSE,NA
-"Double-barred Finch","Stizoptera bichenovii",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Double-barred Finch","Stizoptera bichenovii","u655b","Taeniopygia bichenovii bichenovii",1,1,TRUE,"alias",FALSE,NA
 "Striped Honeyeater","Plectorhyncha lanceolata","u585","Plectorhyncha lanceolata",1,1,TRUE,"binomial",FALSE,NA
 "Leaden Flycatcher","Myiagra rubecula","u365c;u365d","Myiagra rubecula rubecula;Myiagra rubecula yorki",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Little Grassbird","Poodytes gramineus","u522a","Poodytes gramineus goulburni",1,1,TRUE,"binomial",FALSE,NA
@@ -164,7 +164,7 @@
 "Brown Quail","Synoicus ypsilophorus","u11a","Synoicus ypsilophorus australis",1,1,TRUE,"binomial",FALSE,NA
 "Brown-headed Honeyeater","Melithreptus brevirostris","u583a;u583d","Melithreptus brevirostris brevirostris;Melithreptus brevirostris pallidiceps",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Pink-eared Duck","Malacorhynchus membranaceus","u213","Malacorhynchus membranaceus",1,1,TRUE,"binomial",FALSE,NA
-"Yellow-throated Scrubwren","Neosericornis citreogularis",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Yellow-throated Scrubwren","Neosericornis citreogularis","u493b;u493c","Sericornis citreogularis citreogularis;Sericornis citreogularis intermedius",2,2,TRUE,"alias",TRUE,"multiple_nsw_subspecies"
 "Azure Kingfisher","Ceyx azureus","u319a","Ceyx azureus azureus",1,1,TRUE,"binomial",FALSE,NA
 "Little Heron","Butorides atricapilla",NA,NA,0,0,FALSE,"none",FALSE,NA
 "Yellow-throated Miner","Manorina flavigula","u635a;u635e","Manorina flavigula flavigula;Manorina flavigula wayensis",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
@@ -173,7 +173,7 @@
 "Rose Robin","Petroica rosea","u384","Petroica rosea",1,1,TRUE,"binomial",FALSE,NA
 "Eastern Shrike-tit","Falcunculus frontatus","u416","Falcunculus frontatus",1,1,TRUE,"binomial",FALSE,NA
 "Sahul Cicadabird","Edolisoma tenuirostre","u429b","Edolisoma tenuirostre tenuirostre",1,1,TRUE,"binomial",FALSE,NA
-"Buff-banded Rail","Gallirallus philippensis",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Buff-banded Rail","Gallirallus philippensis","u46c","Hypotaenidia philippensis mellori",1,1,TRUE,"alias",FALSE,NA
 "Yellow-billed Spoonbill","Platalea flavipes","u182","Platalea flavipes",1,1,TRUE,"binomial",FALSE,NA
 "Mallard","Anas platyrhynchos",NA,NA,0,0,FALSE,"none",FALSE,NA
 "Singing Honeyeater","Gavicalis virescens","u608b;u608c","Gavicalis virescens forresti;Gavicalis virescens sonorus",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
@@ -203,7 +203,7 @@
 "Nankeen Night Heron","Nycticorax caledonicus","u192","Nycticorax caledonicus australasiae",1,1,TRUE,"binomial",FALSE,NA
 "Australian Owlet-nightjar","Aegotheles cristatus","u317a","Aegotheles cristatus cristatus",1,1,TRUE,"binomial",FALSE,NA
 "Red-backed Fairywren","Malurus melanocephalus","u541b","Malurus melanocephalus melanocephalus",1,1,TRUE,"binomial",FALSE,NA
-"Gray Goshawk","Tachyspiza novaehollandiae",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Gray Goshawk","Tachyspiza novaehollandiae","u220","Accipiter novaehollandiae",1,1,TRUE,"alias",FALSE,NA
 "Peregrine Falcon","Falco peregrinus","u237a","Falco peregrinus macropus",1,1,TRUE,"binomial",FALSE,NA
 "Speckled Warbler","Pyrrholaemus sagittatus","u504","Pyrrholaemus sagittatus",1,1,TRUE,"binomial",FALSE,NA
 "Purple-backed Fairywren","Malurus assimilis","u536d","Malurus assimilis assimilis",1,1,TRUE,"binomial",FALSE,NA
@@ -216,7 +216,7 @@
 "Eurasian Whimbrel","Numenius phaeopus","u150b","Numenius phaeopus variegatus",1,1,TRUE,"binomial",FALSE,NA
 "Western Gerygone","Gerygone fusca","u463a","Gerygone fusca exsul",1,0,TRUE,"binomial",FALSE,NA
 "Cockatiel","Nymphicus hollandicus","u274","Nymphicus hollandicus",1,1,TRUE,"binomial",FALSE,NA
-"Collared Sparrowhawk","Tachyspiza cirrocephala",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Collared Sparrowhawk","Tachyspiza cirrocephala","u222","Accipiter cirrocephalus cirrocephalus",1,1,TRUE,"alias",FALSE,NA
 "Ruddy Turnstone","Arenaria interpres","u129","Arenaria interpres interpres",1,1,TRUE,"binomial",FALSE,NA
 "Bassian Thrush","Zoothera lunulata","u779c","Zoothera lunulata lunulata",1,1,TRUE,"binomial",FALSE,NA
 "Scarlet Robin","Petroica boodang","u380a","Petroica boodang boodang",1,1,TRUE,"binomial",FALSE,NA
@@ -260,7 +260,7 @@
 "Glossy Ibis","Plegadis falcinellus","u178","Plegadis falcinellus",1,1,TRUE,"binomial",FALSE,NA
 "White-fronted Chat","Epthianura albifrons","u448","Epthianura albifrons",1,1,TRUE,"binomial",FALSE,NA
 "Square-tailed Kite","Lophoictinia isura","u230","Lophoictinia isura",1,1,TRUE,"binomial",FALSE,NA
-"Double-banded Plover","Anarhynchus bicinctus",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Double-banded Plover","Anarhynchus bicinctus","u140","Charadrius bicinctus bicinctus",1,0,TRUE,"alias",FALSE,NA
 "Masked Woodswallow","Artamus personatus","u544","Artamus personatus",1,1,TRUE,"binomial",FALSE,NA
 "Crested Bellbird","Oreoica gutturalis","u419a;u419b","Oreoica gutturalis gutturalis;Oreoica gutturalis pallescens",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Kelp Gull","Larus dominicanus","u981a","Larus dominicanus antipodus",1,1,TRUE,"binomial",FALSE,NA
@@ -275,7 +275,7 @@
 "Stubble Quail","Coturnix pectoralis","u9","Coturnix pectoralis",1,1,TRUE,"binomial",FALSE,NA
 "Hooded Robin","Melanodryas cucullata","u385a;u385c","Melanodryas cucullata cucullata;Melanodryas cucullata picata",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
 "Australian Crake","Porzana fluminea","u49","Porzana fluminea",1,1,TRUE,"binomial",FALSE,NA
-"Pale-yellow Robin","Eopsaltria capito",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Pale-yellow Robin","Eopsaltria capito","u396a","Tregellasia capito capito",1,1,TRUE,"alias",FALSE,NA
 "Splendid Fairywren","Malurus splendens","u532b","Malurus splendens melanotus",1,1,TRUE,"binomial",FALSE,NA
 "Whiskered Tern","Chlidonias hybrida","u110","Chlidonias hybrida javanicus",1,1,TRUE,"binomial",FALSE,NA
 "Lewin's Rail","Lewinia pectoralis","u45c","Lewinia pectoralis pectoralis",1,1,TRUE,"binomial",FALSE,NA
@@ -333,7 +333,7 @@
 "Black Honeyeater","Sugomel nigrum","u589","Sugomel nigrum",1,1,TRUE,"binomial",FALSE,NA
 "Swift Parrot","Lathamus discolor","u309","Lathamus discolor",1,1,TRUE,"binomial",FALSE,NA
 "White-fronted Tern","Sterna striata",NA,NA,0,0,FALSE,"none",FALSE,NA
-"Greater Sand-Plover","Anarhynchus leschenaultii",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Greater Sand-Plover","Anarhynchus leschenaultii","u141","Charadrius leschenaultii leschenaultii",1,1,TRUE,"alias",FALSE,NA
 "White-throated Honeyeater","Melithreptus albogularis","u579b","Melithreptus albogularis inopinatus",1,1,TRUE,"binomial",FALSE,NA
 "Marsh Sandpiper","Tringa stagnatilis",NA,NA,0,0,FALSE,"none",FALSE,NA
 "Hooded Plover","Thinornis cucullatus","u138a","Thinornis cucullatus cucullatus",1,1,TRUE,"binomial",FALSE,NA
@@ -353,7 +353,7 @@
 "Bush Thick-knee","Burhinus grallarius","u174","Burhinus grallarius",1,1,TRUE,"binomial",FALSE,NA
 "Lord Howe Rail","Gallirallus sylvestris",NA,NA,0,0,FALSE,"none",FALSE,NA
 "Sooty Owl","Tyto tenebricosa","u253","Tyto tenebricosa tenebricosa",1,1,TRUE,"binomial",FALSE,NA
-"Siberian Sand-Plover","Anarhynchus mongolus",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Siberian Sand-Plover","Anarhynchus mongolus","u139a;u139b","Charadrius mongolus mongolus;Charadrius mongolus stegmanni",2,2,TRUE,"alias",TRUE,"multiple_nsw_subspecies"
 "Great Knot","Calidris tenuirostris","u165","Calidris tenuirostris",1,1,TRUE,"binomial",FALSE,NA
 "Wood Sandpiper","Tringa glareola","u154","Tringa glareola",1,1,TRUE,"binomial",FALSE,NA
 "Red-tailed Black-Cockatoo","Calyptorhynchus banksii","u264a;u264e","Calyptorhynchus banksii banksii;Calyptorhynchus banksii samueli",2,2,TRUE,"binomial",TRUE,"multiple_nsw_subspecies"
@@ -370,7 +370,7 @@
 "Bourke's Parrot","Neopsephotus bourkii","u304","Neopsephotus bourkii",1,1,TRUE,"binomial",FALSE,NA
 "Chestnut Quail-thrush","Cinclosoma castanotum","u437a","Cinclosoma castanotum castanotum",1,1,TRUE,"binomial",FALSE,NA
 "Australasian Bittern","Botaurus poiciloptilus","u197","Botaurus poiciloptilus",1,1,TRUE,"binomial",FALSE,NA
-"Black-backed Bittern","Botaurus dubius",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Black-backed Bittern","Botaurus dubius","u195","Ixobrychus dubius",1,1,TRUE,"alias",FALSE,NA
 "Shy Heathwren","Hylacola cauta",NA,NA,0,0,FALSE,"none",FALSE,NA
 "Brown Noddy","Anous stolidus","u122","Anous stolidus pileatus",1,1,TRUE,"binomial",FALSE,NA
 "Albert's Lyrebird","Menura alberti","u351","Menura alberti",1,1,TRUE,"binomial",FALSE,NA
@@ -382,7 +382,7 @@
 "Common Sandpiper","Actitis hypoleucos","u157","Actitis hypoleucos",1,1,TRUE,"binomial",FALSE,NA
 "White-browed Treecreeper","Climacteris affinis","u561b","Climacteris affinis superciliosus",1,1,TRUE,"binomial",FALSE,NA
 "Pomarine Jaeger","Stercorarius pomarinus","u945","Stercorarius pomarinus",1,1,TRUE,"binomial",FALSE,NA
-"Black Bittern","Botaurus flavicollis",NA,NA,0,0,FALSE,"none",FALSE,NA
+"Black Bittern","Botaurus flavicollis","u196a","Ixobrychus flavicollis australis",1,1,TRUE,"alias",FALSE,NA
 "Black-bellied Plover","Pluvialis squatarola",NA,NA,0,0,FALSE,"none",FALSE,NA
 "Australian Painted-Snipe","Rostratula australis","u170","Rostratula australis",1,1,TRUE,"binomial",FALSE,NA
 "White-winged Tern","Chlidonias leucopterus","u109","Chlidonias leucopterus",1,1,TRUE,"binomial",FALSE,NA

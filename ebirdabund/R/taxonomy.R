@@ -4,7 +4,7 @@
 #
 # Join order per species: (1) binomial (genus + species) — the reliable key;
 # (2) exact common-name; (3) manual alias override. A species with no match is
-# simply not risk-listed. `risk_listed` is TRUE iff >= 1 WLAB taxon matched.
+# simply not in the list. `risk_assessed` is TRUE iff >= 1 WLAB taxon matched.
 
 # Region qualifiers in a WLAB subspecies common name that place it clearly
 # OUTSIDE NSW. Used only for the wlab_review flag (count NSW-plausible ssp).
@@ -40,8 +40,9 @@ binomial <- function(x) {
 #'   WLAB subspecies are NSW-plausible (i.e. match none of these tokens).
 #' @return data.frame, one row per modeled species: `common_name`,
 #'   `scientific_name`, `wlab_taxon_id`, `wlab_scientificname`,
-#'   `n_wlab_subspecies`, `n_nsw_subspecies`, `risk_listed`, `match_type`,
-#'   `wlab_review`, `wlab_review_reason`.
+#'   `n_wlab_subspecies`, `n_nsw_subspecies`, `risk_assessed`, `match_type`,
+#'   `wlab_review`, `wlab_review_reason`. `risk_assessed` = present in the WLAB
+#'   working list (which covers common species too), not "threatened".
 #' @export
 build_taxonomy_crosswalk <- function(species_common, ebird_taxonomy, reidbaker,
                                      aliases = NULL,
@@ -97,7 +98,7 @@ build_taxonomy_crosswalk <- function(species_common, ebird_taxonomy, reidbaker,
       wlab_scientificname = if (nrow(hit)) cc$wlab_scientificname else NA_character_,
       n_wlab_subspecies   = if (nrow(hit)) cc$n_wlab_subspecies else 0L,
       n_nsw_subspecies    = as.integer(n_nsw),
-      risk_listed         = nrow(hit) > 0,
+      risk_assessed       = nrow(hit) > 0,
       match_type          = mt,
       wlab_review         = !is.na(review_reason),
       wlab_review_reason  = review_reason,

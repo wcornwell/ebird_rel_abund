@@ -1,1 +1,16 @@
 ebird_common_name,wlab_scientificname,note
+Silver Gull,Larus novaehollandiae,genus reshuffle Chroicocephalus<-Larus
+Gray Goshawk,Accipiter novaehollandiae,genus reshuffle Tachyspiza<-Accipiter
+Brown Goshawk,Accipiter fasciatus,genus reshuffle Tachyspiza<-Accipiter
+Collared Sparrowhawk,Accipiter cirrocephalus,genus reshuffle Tachyspiza<-Accipiter
+Double-banded Plover,Charadrius bicinctus,genus reshuffle Anarhynchus<-Charadrius
+Greater Sand-Plover,Charadrius leschenaultii,genus reshuffle Anarhynchus<-Charadrius
+Siberian Sand-Plover,Charadrius mongolus,genus reshuffle Anarhynchus<-Charadrius
+Kentish Plover,Charadrius alexandrinus,genus reshuffle Anarhynchus<-Charadrius
+Oriental Plover,Charadrius veredus,genus reshuffle Anarhynchus<-Charadrius
+Black-backed Bittern,Ixobrychus dubius,genus reshuffle Botaurus<-Ixobrychus
+Black Bittern,Ixobrychus flavicollis,genus reshuffle Botaurus<-Ixobrychus
+Buff-banded Rail,Hypotaenidia philippensis,genus reshuffle Gallirallus<-Hypotaenidia
+Yellow-throated Scrubwren,Sericornis citreogularis,genus reshuffle Neosericornis<-Sericornis
+Double-barred Finch,Taeniopygia bichenovii,genus reshuffle Stizoptera<-Taeniopygia
+Pale-yellow Robin,Tregellasia capito,genus reshuffle Eopsaltria<-Tregellasia

@@ -172,7 +172,7 @@ for (i in seq_len(nrow(rez))) {
     common_name    = cw$common_name[cw_idx],
     scientific_name = cw$scientific_name[cw_idx],
     wlab_taxon_id  = cw$wlab_taxon_id[cw_idx],
-    risk_listed    = cw$risk_listed[cw_idx],
+    risk_assessed  = cw$risk_assessed[cw_idx],
     wlab_review    = cw$wlab_review[cw_idx],
     migration         = tr_col("migration"),
     feeding_guild     = tr_col("feeding_guild"),

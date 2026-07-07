@@ -58,7 +58,7 @@ dir.create(OUT_DIR, showWarnings = FALSE)
 # Final CSV column order (header written once; workers produce the seasonality
 # block, main process adds taxonomy + abundance + provenance).
 OUT_COLS <- c("common_name", "scientific_name", "wlab_taxon_id",
-              "wlab_scientificname", "risk_listed", "wlab_review",
+              "wlab_scientificname", "risk_assessed", "wlab_review",
               "wlab_review_reason", "rez", "n_checklists_rez", "n_positive_rez",
               "sufficient", "seasonality_index", "amplitude_link", "peak_doy",
               "peak_date", "prob_seasonal", "is_seasonal", "window_start_doy",
@@ -178,7 +178,7 @@ finalise_rows <- function(sp, rows) {
     scientific_name     = cw$scientific_name,
     wlab_taxon_id       = cw$wlab_taxon_id,
     wlab_scientificname = cw$wlab_scientificname,
-    risk_listed         = cw$risk_listed,
+    risk_assessed       = cw$risk_assessed,
     wlab_review         = cw$wlab_review,
     wlab_review_reason  = cw$wlab_review_reason,
     rows[, setdiff(names(rows), "common_name")],

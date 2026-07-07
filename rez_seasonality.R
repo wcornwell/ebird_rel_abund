@@ -107,7 +107,7 @@ crosswalk <- function(common) {
     scientific_name     = sci,
     wlab_taxon_id       = if (nrow(hit)) paste(hit$WLAB_Taxon_ID, collapse = ";") else NA_character_,
     wlab_scientificname = if (nrow(hit)) paste(hit$WLAB_ScientificName, collapse = ";") else NA_character_,
-    risk_listed         = nrow(hit) > 0
+    risk_assessed       = nrow(hit) > 0
   )
 }
 
@@ -261,7 +261,7 @@ for (sp in TEST_SPECIES) {
                  scientific_name = cw$scientific_name,
                  wlab_taxon_id = cw$wlab_taxon_id,
                  wlab_scientificname = cw$wlab_scientificname,
-                 risk_listed = cw$risk_listed,
+                 risk_assessed = cw$risk_assessed,
                  stringsAsFactors = FALSE),
       s,
       data.frame(mean_abund = abd[["mean_abund"]],
