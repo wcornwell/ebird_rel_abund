@@ -69,7 +69,7 @@ ebird_rel_abund/
 │   ├── top50_{rez_name}.png
 │   └── abundance_{rez_name}.csv
 │
-├── nsw_species_list.csv     # 556 species, reporting_rate >= 0.5%
+├── nsw_species_list.csv     # 551 species, reporting_rate >= 0.5%
 ├── nsw_ebird_taxonomy.csv   # common_name → scientific_name for BOTW lookup
 ├── batch_nsw_log.csv        # Per-species run log — columns: common_name,
 │                            #   scientific_name, status, exclusion_reason,
@@ -147,9 +147,10 @@ The EBD is read with integer column indices (cols 6, 11, 35) not names — `vali
       species, so subsequent runs complete instantly. Requires EBIRDST_KEY env var
       (set automatically in the script from the stored key).
    e. COVARIATES: download ESA/SRTM/WorldClim/WorldPop/JRC/SoilGrids and stream
-      Meta CHMv2 canopy height once → cov_stack_v5_{bbox}.tif in
-      ebirdabund_cache/ (bbox + version keyed, shared across runs). v5 marks
-      tree_height switching from OzTreeMap to Meta/WRI CHMv2 DINOv3.
+      Meta CHMv2 canopy height once → cov_stack_v7_{bbox}.tif in
+      ebirdabund_cache/ (bbox + version keyed, shared across runs). v7 is the
+      current key (v5 = CHMv2 tree_height, v6 = nightlights, v7 = palsar_hv;
+      see the version history in Repo Layout).
    f. SAMPLING MASTER: one-time covariate extraction + observer_expertise join
       → sampling_master.rds. Built on first call to prepare_sampling_master().
    g. BATCH: estimate_abundance_batch() — parallel GAM per species
@@ -210,7 +211,7 @@ Effort covariates are log-transformed because they are right-skewed and the log 
 
 **Exclusion criteria**: fewer than 50 positive checklists after hex subsampling, or model sum ≤ 1e-5 across the polygon.
 
-**Range masking**: ebirdst 2023 preferred; falls back to BOTW 2025 if the species is not in the ebirdst catalogue or if the ebirdst mask produces zero abundance over the study region. ~266 of 479 modelled NSW species are in the ebirdst 2023 catalogue. Ranges are pre-downloaded by `run_batch_nsw.R` before the batch (download step is skipped for species already cached locally). The `range_source` column in `batch_nsw_log.csv` records which source was used per species.
+**Range masking**: ebirdst 2023 preferred; falls back to BOTW 2025 if the species is not in the ebirdst catalogue or if the ebirdst mask produces zero abundance over the study region. In the current NSW run (394 modelled species), 218 were masked with ebirdst 2023 ranges, 171 with BOTW 2025, and 41 left unmasked. Ranges are pre-downloaded by `run_batch_nsw.R` before the batch (download step is skipped for species already cached locally). The `range_source` column in `batch_nsw_log.csv` records which source was used per species.
 
 **BOTW name aliases** (`botw_name_aliases.csv` at repo root): eBird/Clements and BirdLife/HBW disagree on a number of recent genus reshuffles, gender-agreement renames, and splits (e.g. Plum-headed Finch is `Emblema modestum` in eBird but `Neochmia modesta` in BOTW). Without a translation layer, the BOTW fallback returns 0 rows for these species and the prediction is left unmasked. `load_range_botw()` consults the alias CSV (passed in by `run_batch_nsw.R`) and rewrites its query to the BOTW name on a hit. Columns: `ebird_sci_name`, `botw_sci_name`, `common_name`, `note`. An empty `botw_sci_name` records "no BOTW equivalent exists" and short-circuits the lookup to avoid a guaranteed-zero round-trip. The file is region-agnostic — add entries as new taxonomy splits surface (audit by filtering `batch_nsw_log.csv` for `range_source == "unmasked"` after each batch and checking BOTW for synonyms).
 
@@ -337,7 +338,7 @@ First concrete use: `analysis/tree_height/test_tree_height_alternatives.R` runs 
 
 The package (`ebirdabund/`) is region-agnostic — `fit_species_model()` and `estimate_abundance_batch()` accept any `sf` polygon and any number of EBD/sampling files as character vectors.
 
-**Current setup:** NSW + 100 km buffer as the study polygon, with EBD training data from NSW, ACT, VIC, QLD, and SA. The buffer captures ~397k checklists per species after hex subsampling (vs ~133k with NSW-only data).
+**Current setup:** NSW + 100 km buffer as the study polygon, with EBD training data from NSW, ACT, VIC, QLD, and SA. The buffer captures ~334k checklists per species after hex subsampling (spacing 5 km).
 
 The work needed to add a new region:
 
