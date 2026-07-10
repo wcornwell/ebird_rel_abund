@@ -124,22 +124,22 @@ Fixing Negative Binomial rather than selecting the distribution from data trades
 | `day_of_year` smooth | Thin-plate spline, `k = 5` | Cyclic cubic spline (`bs = "cc"`), `k = 10`, boundary knots `c(0, 365)` |
 | `time_observations_started` smooth | Cyclic cubic spline, `k = 7`, interior knots | Cyclic cubic spline (`bs = "cc"`), `k = 4`, boundary knots `c(0, 24)` |
 | Other smooth `k` values | Fixed at 5 | Data-driven via `safe_k()`: min(default, n\_unique − 1), floor of 3 |
-| Over-fit penalty | None | `gamma = 1.4` |
-| Term shrinkage | No | `select = TRUE`; falls back to `select = FALSE`, then `discrete = FALSE`, on non-convergence |
+| Over-fit penalty | None | BIC-like `gamma = log(nrow(df)) / 2` (≈6.4 at NSW+buffer scope) |
+| Term shrinkage | No | `select = TRUE`, with a 6-step fallback cascade on non-convergence: BIC gamma → `gamma = 2.0` → `gamma = 1.4` → `gamma = 1.4, select = FALSE` → simplified formula → simplified formula, `discrete = FALSE` |
 
-`bam()` is faster and lower-memory than `gam()` for large datasets. A cyclic spline for `day_of_year` enforces continuity at the year boundary (important for southern-hemisphere species whose abundance peak spans December–January). `gamma = 1.4` penalises complexity beyond what the data support, reducing over-fitting in data-sparse regions.
+`bam()` is faster and lower-memory than `gam()` for large datasets. A cyclic spline for `day_of_year` enforces continuity at the year boundary (important for southern-hemisphere species whose abundance peak spans December–January). The BIC-like `gamma` penalises complexity beyond what the data support, reducing over-fitting in data-sparse regions; it was validated against the conventional `gamma = 1.4` in a paired-CV sweep (see CLAUDE.md, Key Modelling Decisions) and kept as the default because it produces smoother, more defensible smooths at a small predictive cost. The reference level for `protocol_type` is always the *modal* (most-common) protocol in the training data (`modal_protocol()`), not a hardcoded name — eBird has renamed its protocol strings across releases, and a hardcoded check silently falling back to an alphabetically-first, near-empty protocol level was the root cause of a systematic bug that collapsed predicted abundance toward zero for otherwise well-fit species (see CLAUDE.md's "protocol_type reference-level incident").
 
 ### 6. Standard-effort prediction
 
 | | Strimas-Mackey et al. (2023) | `ebirdabund` |
 |---|---|---|
-| Reference date | Mid-June (hard-coded for Wood Thrush) | Circular mean of detection day-of-year |
-| Peak observation time | Scans 300 candidate start times; selects time maximising lower confidence limit | Circular mean of detection start times |
-| Standard effort | 1 km, 60 min, 1 observer, Traveling Count | Same |
+| Reference date | Mid-June (hard-coded for Wood Thrush) | Argmax of the link-scale lower 95% CI (`fit − 1.96·se`) from a sweep over `1:365`, at mean habitat and standard effort — the same method Cornell uses for peak *time*, generalised here to peak *date* for any species |
+| Peak observation time | Scans 300 candidate start times; selects time maximising lower confidence limit | Same approach: argmax of the lower 95% CI over `seq(0, 24, length.out = 300)`, evaluated at the already-chosen peak date |
+| Standard effort | 1 km, 60 min, 1 observer, Traveling Count | 1 km, 60 min, 1 observer, and the modal (most-common) `protocol_type` in the training data |
 | Prediction cap | None | Log-scale cap at the 90th percentile of observed non-zero counts |
 | `abd_se` scale | Response scale | Log (link) scale; asymmetric 95% CI: `[abd × exp(−1.96 × abd_se), abd × exp(+1.96 × abd_se)]` |
 
-The circular mean is used for both reference date and reference time so that species with phenological peaks near the year boundary (e.g. December–January breeders in the southern hemisphere) or near midnight are handled correctly. Storing `abd_se` on the log scale allows asymmetric confidence intervals that respect the positivity constraint on abundance.
+Using the lower CI rather than the point estimate keeps the chosen peak inside the well-supported region of each smooth — otherwise a sparsely-sampled date or time (e.g. pre-dawn) can win the argmax purely on estimate noise. The cyclic cubic splines underlying both smooths (`bs = "cc"`, boundary knots `c(0, 365)` and `c(0, 24)`) enforce continuity at the year boundary and midnight, so species with phenological peaks that straddle December–January or span midnight are handled correctly without any special-casing. Storing `abd_se` on the log scale allows asymmetric confidence intervals that respect the positivity constraint on abundance.
 
 ### 7. Prediction output and range masking
 
@@ -220,7 +220,7 @@ Statuses: **Adopted** = encoded in the production pipeline. **Tested, not adopte
 | Test | Question | Outcome | Script |
 |---|---|---|---|
 | Full NSW-only batch | End-to-end smoke test on the NSW polygon with NSW-only training data | **Reference** (original pre-buffer baseline; superseded by buffered run) | `analysis/integration/test_nsw.R` |
-| Full NSW + 100 km buffer batch | Same pipeline with ACT/VIC/QLD/SA buffer training data | **Adopted as production setup** (~397 k vs ~133 k checklists per species after subsampling) | `analysis/integration/test_nsw_buffer.R` |
+| Full NSW + 100 km buffer batch | Same pipeline with ACT/VIC/QLD/SA buffer training data | **Adopted as production setup** (~334 k checklists per species after subsampling, vs a much smaller NSW-only baseline; see CLAUDE.md for current per-run figures) | `analysis/integration/test_nsw_buffer.R` |
 | Cross-region map comparison | Visual side-by-side of NSW-only vs buffered predictions for representative species | **Diagnostic** | `analysis/integration/plot_comparison_nsw.R` |
 
 ---

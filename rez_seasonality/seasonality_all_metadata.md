@@ -12,6 +12,18 @@ species contributes 4 rows. 551 species × 4 = 2,204 rows.
 `ebirdabund/R/seasonality.R`. Study region: New South Wales + 100 km buffer,
 trained on eBird data from NSW, ACT, VIC, QLD, SA.
 
+**2026-07-10 patch:** `mean_abund`/`se_abund` for 22 species (previously `NA`
+due to the `protocol_type` reference-level bug — see CLAUDE.md's "protocol_type
+reference-level incident") were back-filled by
+`analysis/modeling/patch_seasonality_mean_abund.R`, which re-fits + predicts
+just those species under the fix and writes their region abundance into the
+existing rows; their seasonality metrics (columns 22–32) were untouched since
+those never depended on the buggy reference level. A full `run_batch_nsw.R`
+re-run is in progress to refresh `mean_abund`/`se_abund` for the remaining
+~394 already-"ok" species (their absolute abundance level was found to shift
+by roughly ±5–30%, not the seasonality shape) — treat those columns as
+provisional until that finishes.
+
 ---
 
 ## Data sources
@@ -59,7 +71,10 @@ non-discrete optimiser).
 ### Seasonality metrics (posterior simulation)
 For each region, an **effort-standardised** seasonal curve is evaluated by
 sweeping `day_of_year` 1–365 at a reference checklist (60 min, 1 km, 1 observer,
-Traveling Count, **median** observer expertise, habitat at the region mean).
+the modal/most-common `protocol_type` in the training data — see
+`modal_protocol()` in `ebirdabund/R/utils.R`; do not assume a specific protocol
+name, eBird has renamed these across releases — **median** observer expertise,
+habitat at the region mean).
 1,000 coefficient vectors are drawn ~ N(β̂, V_β) (`mgcv::rmvn`) and the curve
 recomputed for each draw. From these draws:
 - **`amplitude_link`** = median of (max − min) on the link (log) scale.
@@ -76,10 +91,25 @@ sub-sampling; insufficient regions get `NA` seasonality metrics.
 ### Abundance (`mean_abund`, `se_abund`)
 Taken from the per-species 3 km abundance stack (range-masked; ebirdst 2023 else
 BOTW 2025). Per region the surface is cropped/masked to the polygon;
-`mean_abund` is the mean over all cells in the region **treating range-masked
-NAs as 0** (absence pulls the mean down); `se_abund` is the mean model SE over
-the cells where the species was predicted. `statewide` uses the NSW state
+`mean_abund` is *intended* to be the mean over all cells in the region
+**treating range-masked NAs as 0** (absence pulls the mean down, rather than
+being excluded from the average), and `se_abund` is the mean model SE over the
+cells where the species was predicted. `statewide` uses the NSW state
 boundary; REZs use their polygons.
+
+**Known limitation:** the "NA → 0" behaviour only holds when a region is a
+*mix* of predicted and range-masked cells. `terra::global(x, "sum", na.rm =
+TRUE)` returns `NA` (not `0`) when *every* cell in the region crop is `NA` —
+i.e. when a species is entirely absent from that region under its range mask.
+In that case `mean_abund` is `NA` for that region even though "the true value
+is 0" would be the intended semantics. This affects REZ-level rows more than
+`statewide` (a species is more likely to be wholly absent from one small REZ
+than from the whole state) and is considered lower priority: for a species
+genuinely never recorded in a given REZ, `NA` and `0` are hard to distinguish
+in practice and either reading is defensible. `mean_abund` is also `NA` for
+any species with no layer in the abundance stack at all (excluded from the
+main batch, or not yet run — see `batch_nsw_log.csv`'s `status`/
+`exclusion_reason`), which is a distinct, unambiguous case.
 
 ### Trait & taxonomy joins
 AVONET joined by eBird scientific name via `taxonomy/avonet_name_aliases.csv`
@@ -138,7 +168,7 @@ an English-name fallback. WLAB crosswalk built by `ebirdabund/R/taxonomy.R`.
 | 30 | `window_start_date` | chr | `window_start_doy` as a date | — |
 | 31 | `window_end_date` | chr | `window_end_doy` as a date | — |
 | 32 | `window_wraps` | logical | TRUE if the window crosses the year boundary (Dec→Jan) | — |
-| 33 | `mean_abund` | num | Mean predicted relative abundance in the region (range-masked NAs = 0) | abundance stack |
+| 33 | `mean_abund` | num | Mean predicted relative abundance in the region (range-masked NAs treated as 0, except when a region is *entirely* range-masked — see Methods caveat); also NA if the species has no abundance-stack layer at all | abundance stack |
 | 34 | `se_abund` | num | Mean model SE over predicted cells (log scale) | abundance SE stack |
 | 35 | `n_train_total` | int | Sub-sampled checklists used to fit the species' GAM | eBird |
 | 36 | `dev_expl` | num | Deviance explained by the fitted GAM | `mgcv` summary / NB fallback |
