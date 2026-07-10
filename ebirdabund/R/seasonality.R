@@ -31,8 +31,7 @@ fit_rez_seasonality <- function(df) {
   full_form   <- build_form(FALSE)
   simple_form <- build_form(TRUE)
 
-  protos <- levels(df$protocol_type)
-  ref    <- if ("Traveling Count" %in% protos) "Traveling Count" else protos[1]
+  ref <- modal_protocol(df$protocol_type)
   df$protocol_type <- stats::relevel(df$protocol_type, ref = ref)
   knots  <- list(time_observations_started = c(0, 24), day_of_year = c(0, 365))
   gbic   <- log(nrow(df)) / 2

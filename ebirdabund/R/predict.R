@@ -1,7 +1,9 @@
 # Convenience: get the reference protocol_type used during model fitting.
+# Computed directly from the fitted model's training data (not just
+# levels(...)[1], which reflects factor level order rather than frequency)
+# so this stays correct regardless of how the training-time relevel was done.
 ref_protocol <- function(model) {
-  lvls <- levels(model$model$protocol_type)
-  if ("Traveling Count" %in% lvls) "Traveling Count" else lvls[1]
+  modal_protocol(model$model$protocol_type)
 }
 
 # Predict relative abundance across the prediction surface.

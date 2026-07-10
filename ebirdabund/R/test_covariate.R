@@ -433,9 +433,7 @@ detect_hab_cols <- function(df) {
 # generating smooth-comparison plots. We don't want this to abort the whole
 # species if it doesn't converge — return NULL on failure.
 safe_full_fit <- function(df, formula) {
-  protocols <- levels(df$protocol_type)
-  ref_proto <- if ("Traveling Count" %in% protocols) "Traveling Count" else
-    protocols[1L]
+  ref_proto <- modal_protocol(df$protocol_type)
   df$protocol_type <- stats::relevel(df$protocol_type, ref = ref_proto)
   time_knots <- list(time_observations_started = c(0, 24),
                      day_of_year               = c(0, 365))

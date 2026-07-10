@@ -99,10 +99,10 @@ fit_gam <- function(df) {
   full_formula <- build_gam_formula(df, hab_cols)
   simple_formula <- build_gam_formula(df, hab_cols, simple = TRUE)
 
-  # Set "Traveling Count" as reference level when present, else most common
-  protocols <- levels(df$protocol_type)
-  ref_proto <- if ("Traveling Count" %in% protocols) "Traveling Count" else
-    protocols[1]
+  # Reference level = most common protocol (was previously an alphabetically-
+  # first fallback that could pick a near-empty protocol and blow up the
+  # intercept; see modal_protocol()).
+  ref_proto <- modal_protocol(df$protocol_type)
   df$protocol_type <- stats::relevel(df$protocol_type, ref = ref_proto)
 
   time_knots <- list(time_observations_started = c(0, 24),

@@ -66,10 +66,8 @@ evaluate_model_cv <- function(df, formula = NULL, k = 5L, seed = 42L,
     fold_id <- as.integer(fold_ids)
   }
 
-  # Protocol reference level
-  protocols <- levels(df$protocol_type)
-  ref_proto <- if ("Traveling Count" %in% protocols) "Traveling Count" else
-    protocols[1L]
+  # Protocol reference level (most common, not alphabetically-first)
+  ref_proto <- modal_protocol(df$protocol_type)
 
   time_knots <- list(time_observations_started = c(0, 24))
 

@@ -14,6 +14,16 @@ safe_name <- function(x) {
   gsub("[^a-z0-9]+", "_", tolower(trimws(x)))
 }
 
+# Most frequent value of a protocol_type vector/factor — used as the GAM
+# reference level so predictions are standardised on the dominant protocol.
+# Picking an arbitrary (e.g. alphabetically-first) level instead can select a
+# rare protocol with too few detections to identify a stable baseline
+# coefficient, causing the intercept to blow up toward -Inf (quasi-complete
+# separation) and the whole predicted surface to collapse toward zero.
+modal_protocol <- function(x) {
+  names(sort(table(x), decreasing = TRUE))[1]
+}
+
 # Buffer a polygon by `buffer_km` kilometres using a metric projection.
 #
 # polygon       : sf or sfc (any CRS).

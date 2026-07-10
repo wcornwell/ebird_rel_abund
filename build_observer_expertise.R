@@ -138,10 +138,8 @@ message(sprintf("Observer filter (>= %d checklists/observer): %d observers, %d �
 samp <- ebirdabund:::subsample_hex(samp, spacing_km = HEX_SPACING_KM)
 
 # ── Factor setup ──────────────────────────────────────────────────────────────
-protocols <- levels(samp$protocol_type)
-if ("Traveling Count" %in% protocols) {
-  samp$protocol_type <- stats::relevel(samp$protocol_type, ref = "Traveling Count")
-}
+samp$protocol_type <- stats::relevel(samp$protocol_type,
+                                     ref = modal_protocol(samp$protocol_type))
 samp$observer_id <- factor(samp$observer_id)
 
 n_obs <- nlevels(samp$observer_id)
