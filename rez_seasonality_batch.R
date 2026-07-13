@@ -63,8 +63,8 @@ OUT_COLS <- c("common_name", "scientific_name", "wlab_taxon_id",
               "sufficient", "seasonality_index", "amplitude_link", "peak_doy",
               "peak_date", "prob_seasonal", "is_seasonal", "window_start_doy",
               "window_end_doy", "window_start_date", "window_end_date",
-              "window_wraps", "mean_abund", "se_abund", "n_train_total",
-              "dev_expl", "run_date")
+              "window_wraps", "mean_abund", "se_abund", "range_masked_in_rez",
+              "n_train_total", "dev_expl", "run_date")
 
 # ── Study polygon + statewide border ──────────────────────────────────────────
 message("Building study polygon...")
@@ -116,16 +116,35 @@ region_vect <- c(
                   function(k) terra::vect(rez[rez$REZ_Name == TARGET_REZ[[k]], ])),
            names(TARGET_REZ)))
 
+# Region-mean abundance + SE, read off the prediction stack. Returns a length-3
+# numeric: mean_abund, se_abund, and range_masked_in_rez (0/1/NA as a flag).
+# Three cases:
+#   * stem absent from the stack (species not modelled: below the positive-
+#     checklist threshold, or excluded) -> NA / NA / NA. No surface exists.
+#   * stem present but every cell inside the region is NA (the region falls
+#     wholly outside the species' range mask) -> 0 / 0 / 1. Treated as a hard
+#     absence so a truly-zero region reads as 0, not NA; the flag records that
+#     the zero came from the range mask rather than a modelled ~0.
+#   * otherwise -> modelled mean over the region / mean SE / 0. Masked cells
+#     within a partially-covered region contribute 0 to the numerator (they are
+#     counted in nin), matching the existing whole-region denominator.
 region_abd <- function(stem, region) {
-  if (!stem %in% names(abd_stack)) return(c(mean_abund = NA_real_, se_abund = NA_real_))
+  if (!stem %in% names(abd_stack))
+    return(c(mean_abund = NA_real_, se_abund = NA_real_, range_masked_in_rez = NA_real_))
   rv <- region_vect[[region]]
   la <- abd_stack[[stem]]; ls <- se_stack[[stem]]
   cr  <- terra::mask(terra::crop(la, rv), rv)
   ins <- terra::mask(terra::crop(terra::setValues(la, 1), rv), rv)
   nin <- as.numeric(terra::global(ins, "sum", na.rm = TRUE)[[1]])
+  if (is.na(nin) || nin == 0)              # region doesn't overlap the grid
+    return(c(mean_abund = NA_real_, se_abund = NA_real_, range_masked_in_rez = NA_real_))
+  n_modelled <- as.numeric(terra::global(!is.na(cr), "sum", na.rm = TRUE)[[1]])
+  if (n_modelled == 0)                     # region wholly outside the range mask
+    return(c(mean_abund = 0, se_abund = 0, range_masked_in_rez = 1))
   se  <- terra::mask(terra::crop(ls, rv), rv)
   c(mean_abund = as.numeric(terra::global(cr, "sum", na.rm = TRUE)[[1]]) / nin,
-    se_abund   = as.numeric(terra::global(se, "mean", na.rm = TRUE)[[1]]))
+    se_abund   = as.numeric(terra::global(se, "mean", na.rm = TRUE)[[1]]),
+    range_masked_in_rez = 0)
 }
 
 # ── Worker: fit + summarise one species (no terra, no crosswalk) ───────────────
@@ -172,7 +191,7 @@ run_species_seasonality <- function(sp) {
 finalise_rows <- function(sp, rows) {
   cw <- CW[sp, ]
   abd <- t(vapply(rows$rez, function(r) region_abd(
-    gsub("[^a-z0-9]+", "_", tolower(trimws(sp))), r), numeric(2)))
+    gsub("[^a-z0-9]+", "_", tolower(trimws(sp))), r), numeric(3)))
   out <- data.frame(
     common_name         = sp,
     scientific_name     = cw$scientific_name,
@@ -184,6 +203,7 @@ finalise_rows <- function(sp, rows) {
     rows[, setdiff(names(rows), "common_name")],
     mean_abund          = abd[, "mean_abund"],
     se_abund            = abd[, "se_abund"],
+    range_masked_in_rez = as.logical(abd[, "range_masked_in_rez"]),
     run_date            = as.character(Sys.Date()),
     stringsAsFactors    = FALSE)
   out[, OUT_COLS]

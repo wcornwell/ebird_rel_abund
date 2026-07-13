@@ -97,19 +97,22 @@ being excluded from the average), and `se_abund` is the mean model SE over the
 cells where the species was predicted. `statewide` uses the NSW state
 boundary; REZs use their polygons.
 
-**Known limitation:** the "NA → 0" behaviour only holds when a region is a
-*mix* of predicted and range-masked cells. `terra::global(x, "sum", na.rm =
-TRUE)` returns `NA` (not `0`) when *every* cell in the region crop is `NA` —
-i.e. when a species is entirely absent from that region under its range mask.
-In that case `mean_abund` is `NA` for that region even though "the true value
-is 0" would be the intended semantics. This affects REZ-level rows more than
-`statewide` (a species is more likely to be wholly absent from one small REZ
-than from the whole state) and is considered lower priority: for a species
-genuinely never recorded in a given REZ, `NA` and `0` are hard to distinguish
-in practice and either reading is defensible. `mean_abund` is also `NA` for
-any species with no layer in the abundance stack at all (excluded from the
-main batch, or not yet run — see `batch_nsw_log.csv`'s `status`/
-`exclusion_reason`), which is a distinct, unambiguous case.
+**Wholly range-masked regions → `0`, flagged.** When *every* cell in the region
+crop is `NA` — i.e. the species is entirely absent from that region under its
+range mask — `region_abd()` returns `mean_abund = 0` and `se_abund = 0` (a hard
+absence), rather than the `NA` that `terra::global(x, "sum", na.rm = TRUE)` would
+otherwise produce for an all-`NA` input. The new **`range_masked_in_rez`** column
+is `TRUE` for exactly these rows, so a mask-derived zero stays distinguishable
+from a modelled ~0 (`FALSE`). This matters because some range masks under-cover
+genuinely-occupied areas — e.g. the ebirdst 2023 range clips Eastern Cattle-Egret
+out of the New England REZ despite 66 positive checklists there — so a
+`range_masked_in_rez = TRUE` row with non-trivial `n_positive_rez` flags a
+candidate range-mask gap to audit, not necessarily a true absence.
+
+`mean_abund`/`se_abund`/`range_masked_in_rez` are all `NA` for any species with
+no layer in the abundance stack at all (excluded from the main batch, or not yet
+run — see `batch_nsw_log.csv`'s `status`/`exclusion_reason`), which is a
+distinct, unambiguous case (species not modelled anywhere).
 
 ### Trait & taxonomy joins
 AVONET joined by eBird scientific name via `taxonomy/avonet_name_aliases.csv`
@@ -168,11 +171,12 @@ an English-name fallback. WLAB crosswalk built by `ebirdabund/R/taxonomy.R`.
 | 30 | `window_start_date` | chr | `window_start_doy` as a date | — |
 | 31 | `window_end_date` | chr | `window_end_doy` as a date | — |
 | 32 | `window_wraps` | logical | TRUE if the window crosses the year boundary (Dec→Jan) | — |
-| 33 | `mean_abund` | num | Mean predicted relative abundance in the region (range-masked NAs treated as 0, except when a region is *entirely* range-masked — see Methods caveat); also NA if the species has no abundance-stack layer at all | abundance stack |
-| 34 | `se_abund` | num | Mean model SE over predicted cells (log scale) | abundance SE stack |
-| 35 | `n_train_total` | int | Sub-sampled checklists used to fit the species' GAM | eBird |
-| 36 | `dev_expl` | num | Deviance explained by the fitted GAM | `mgcv` summary / NB fallback |
-| 37 | `run_date` | chr | Date the row was generated | — |
+| 33 | `mean_abund` | num | Mean predicted relative abundance in the region (range-masked NAs treated as 0; a *wholly* range-masked region is 0 with `range_masked_in_rez = TRUE`); NA only if the species has no abundance-stack layer at all | abundance stack |
+| 34 | `se_abund` | num | Mean model SE over predicted cells (log scale); 0 for a wholly range-masked region; NA if no stack layer | abundance SE stack |
+| 35 | `range_masked_in_rez` | logical | TRUE when the region is *entirely* outside the species' range mask (so `mean_abund`/`se_abund` are mask-derived zeros, not modelled values); FALSE for a normal modelled region; NA if the species has no stack layer. A TRUE row with non-trivial `n_positive_rez` flags a possible range-mask gap | abundance stack |
+| 36 | `n_train_total` | int | Sub-sampled checklists used to fit the species' GAM | eBird |
+| 37 | `dev_expl` | num | Deviance explained by the fitted GAM | `mgcv` summary / NB fallback |
+| 38 | `run_date` | chr | Date the row was generated | — |
 
 ---
 
