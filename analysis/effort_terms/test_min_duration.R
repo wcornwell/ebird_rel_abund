@@ -49,9 +49,7 @@ detect_hab_cols <- function(df) {
 # Mirror of evaluate_model_cv's single-fold logic, but with a custom train set
 # (different from the standard "all rows except the test fold").
 fit_and_score <- function(train, test, formula) {
-  protocols <- levels(train$protocol_type)
-  ref_proto <- if ("Traveling Count" %in% protocols) "Traveling Count" else
-    protocols[1L]
+  ref_proto <- modal_protocol(droplevels(train$protocol_type))
   train$protocol_type <- stats::relevel(
     droplevels(train$protocol_type), ref = ref_proto)
   test$protocol_type <- factor(as.character(test$protocol_type),

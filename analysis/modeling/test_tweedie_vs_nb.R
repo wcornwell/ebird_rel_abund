@@ -29,8 +29,7 @@ cov <- prepare_covariates(nsw, cache_dir = CACHE)
 # 5-fold CV for a Tweedie GAM, returning Spearman r and RMSE per fold.
 cv_tweedie <- function(df, formula, k = 5L, seed = 42L) {
   time_knots <- list(time_observations_started = c(0, 24))
-  protocols  <- levels(df$protocol_type)
-  ref_proto  <- if ("Traveling Count" %in% protocols) "Traveling Count" else protocols[1L]
+  ref_proto  <- modal_protocol(df$protocol_type)
 
   set.seed(seed)
   fold_id <- sample(rep_len(seq_len(k), nrow(df)))
@@ -95,8 +94,7 @@ for (sp in SPECIES) {
   formula <- build_gam_formula(df, hab_cols)
 
   time_knots <- list(time_observations_started = c(0, 24))
-  protocols  <- levels(df$protocol_type)
-  ref_proto  <- if ("Traveling Count" %in% protocols) "Traveling Count" else protocols[1L]
+  ref_proto  <- modal_protocol(df$protocol_type)
   df$protocol_type <- stats::relevel(df$protocol_type, ref = ref_proto)
 
   message("\nFitting NB GAM on full data...")
