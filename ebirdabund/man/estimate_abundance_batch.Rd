@@ -17,9 +17,14 @@ estimate_abundance_batch(
   peak_time = NULL,
   use_range = TRUE,
   botw_path = NULL,
+  botw_aliases = NULL,
+  force_botw = character(0),
   range_resolution = "27km",
+  border = NULL,
   n_cores = max(1L, parallel::detectCores() - 1L),
-  output_dir = NULL
+  output_dir = NULL,
+  log_file = NULL,
+  commit_sha = NA_character_
 )
 }
 \arguments{
@@ -51,6 +56,17 @@ Default \code{5}.}
 range are set to \code{NA}.  See \code{\link{predict_species_map}} for
 details.}
 
+\item{botw_aliases}{Optional data frame with columns \code{ebird_sci_name}
+and \code{botw_sci_name}, mapping species whose names differ between
+eBird and BirdLife (genus reshuffles, gender-agreement renames, splits).
+Forwarded to \code{\link{load_range_botw}}; an empty \code{botw_sci_name}
+short-circuits the BOTW lookup for species with no BOTW equivalent.}
+
+\item{force_botw}{Character vector of common names to mask with BOTW
+directly, skipping ebirdst (whose range under-covers some inland/nomadic
+species). Matched against \code{species_list}. See
+\code{\link{predict_species_map}}. Default \code{character(0)}.}
+
 \item{range_resolution}{Resolution passed to \code{ebirdst::load_ranges};
 \code{"27km"} (default) or \code{"9km"}.}
 
@@ -60,6 +76,11 @@ details.}
 \item{output_dir}{If non-\code{NULL}, each species' abundance map
 (\code{.png}) and prediction raster (\code{.tif}) are saved here using
 the species name as the file stem.}
+
+\item{commit_sha}{Optional short git commit hash stamped on every row of
+\code{log_file} so a result can be traced back to the exact source state
+that produced it. Typically captured by the caller via
+\code{git rev-parse --short HEAD}.}
 }
 \value{
 A named list with one element per species (in the same order as

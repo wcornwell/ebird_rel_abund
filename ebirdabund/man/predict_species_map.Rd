@@ -10,10 +10,15 @@ predict_species_map(
   species,
   sci_name = NULL,
   grid_res_km = 1,
+  peak_doy = NULL,
   peak_time = NULL,
   use_range = TRUE,
   botw_path = NULL,
-  range_resolution = "9km"
+  botw_aliases = NULL,
+  force_botw = FALSE,
+  range_resolution = "9km",
+  border = NULL,
+  range_vect = NULL
 )
 }
 \arguments{
@@ -33,6 +38,18 @@ training data (a "typical checklist" reference).}
 \item{use_range}{If \code{TRUE} (default), cells outside the eBird species range
 (from \code{ebirdst::load_ranges}) are set to \code{NA}.  Falls back to polygon-only
 masking with a warning if the range cannot be loaded.}
+
+\item{botw_aliases}{Optional data frame with columns \code{ebird_sci_name}
+and \code{botw_sci_name}, mapping species whose names differ between eBird
+and BirdLife (genus reshuffles, gender-agreement renames, splits).
+Forwarded to \code{\link[=load_range_botw]{load_range_botw()}}; an empty \code{botw_sci_name} short-circuits
+the BOTW lookup for species with no BOTW equivalent.}
+
+\item{force_botw}{If \code{TRUE}, skip the ebirdst range entirely and mask with
+BOTW directly. Use for species whose ebirdst range under-covers genuine
+(often inland/nomadic) occurrence — otherwise ebirdst wins and BOTW is
+never consulted, because the BOTW fallback only fires when the ebirdst mask
+is empty over the \emph{whole} study region. Default \code{FALSE}.}
 
 \item{range_resolution}{Resolution passed to \code{ebirdst::load_ranges};
 \code{"27km"} (default) or \code{"9km"}.}

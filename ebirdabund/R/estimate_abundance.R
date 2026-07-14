@@ -168,6 +168,11 @@ fit_species_model <- function(polygon,
 #'   and BirdLife (genus reshuffles, gender-agreement renames, splits).
 #'   Forwarded to [load_range_botw()]; an empty `botw_sci_name` short-circuits
 #'   the BOTW lookup for species with no BOTW equivalent.
+#' @param force_botw If `TRUE`, skip the ebirdst range entirely and mask with
+#'   BOTW directly. Use for species whose ebirdst range under-covers genuine
+#'   (often inland/nomadic) occurrence — otherwise ebirdst wins and BOTW is
+#'   never consulted, because the BOTW fallback only fires when the ebirdst mask
+#'   is empty over the *whole* study region. Default `FALSE`.
 #'
 #' @return A list with:
 #' \describe{
@@ -187,6 +192,7 @@ predict_species_map <- function(model_fit,
                                 use_range        = TRUE,
                                 botw_path        = NULL,
                                 botw_aliases     = NULL,
+                                force_botw       = FALSE,
                                 range_resolution = "9km",
                                 border           = NULL,
                                 range_vect       = NULL) {
@@ -247,12 +253,16 @@ predict_species_map <- function(model_fit,
 
       mask_result  <- NULL
 
-      # 1. Try ebirdst first
-      range_ebirdst <- load_range_ebirdst(species, range_resolution)
-      mask_result   <- try_mask(r_pred, range_ebirdst, "ebirdst")
-      if (!is.null(mask_result)) range_source <- "ebirdst"
+      # 1. Try ebirdst first, unless BOTW is forced for this species (some
+      #    ebirdst ranges under-cover inland/nomadic occurrence — e.g. Eastern
+      #    Cattle-Egret is clipped out of inland NSW despite regular records).
+      if (!isTRUE(force_botw)) {
+        range_ebirdst <- load_range_ebirdst(species, range_resolution)
+        mask_result   <- try_mask(r_pred, range_ebirdst, "ebirdst")
+        if (!is.null(mask_result)) range_source <- "ebirdst"
+      }
 
-      # 2. Fall back to BOTW
+      # 2. Fall back to BOTW (or use it directly when forced)
       if (is.null(mask_result) && !is.null(botw_path) &&
           !is.null(sci_name) && !is.na(sci_name)) {
         range_botw  <- load_range_botw(sci_name, botw_path, botw_aliases)
@@ -376,6 +386,7 @@ estimate_abundance <- function(polygon,
                                use_range        = TRUE,
                                botw_path        = NULL,
                                botw_aliases     = NULL,
+                               force_botw       = FALSE,
                                range_resolution = "27km") {
 
   model_fit <- fit_species_model(
@@ -400,6 +411,7 @@ estimate_abundance <- function(polygon,
     use_range        = use_range,
     botw_path        = botw_path,
     botw_aliases     = botw_aliases,
+    force_botw       = force_botw,
     range_resolution = range_resolution
   )
 

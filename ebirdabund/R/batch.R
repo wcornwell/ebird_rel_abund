@@ -34,6 +34,10 @@
 #'   eBird and BirdLife (genus reshuffles, gender-agreement renames, splits).
 #'   Forwarded to \code{\link{load_range_botw}}; an empty \code{botw_sci_name}
 #'   short-circuits the BOTW lookup for species with no BOTW equivalent.
+#' @param force_botw Character vector of common names to mask with BOTW
+#'   directly, skipping ebirdst (whose range under-covers some inland/nomadic
+#'   species). Matched against \code{species_list}. See
+#'   \code{\link{predict_species_map}}. Default \code{character(0)}.
 #' @param n_cores Number of parallel workers.  Defaults to
 #'   \code{parallel::detectCores() - 1} (minimum 1).
 #' @param output_dir If non-\code{NULL}, each species' abundance map
@@ -90,6 +94,7 @@ estimate_abundance_batch <- function(
     use_range        = TRUE,
     botw_path        = NULL,
     botw_aliases     = NULL,
+    force_botw       = character(0),
     range_resolution = "27km",
     border           = NULL,
     n_cores          = max(1L, parallel::detectCores() - 1L),
@@ -178,6 +183,7 @@ estimate_abundance_batch <- function(
         use_range        = use_range,
         botw_path        = botw_path,
         botw_aliases     = botw_aliases,
+        force_botw       = sp %in% force_botw,
         range_resolution = range_resolution,
         border           = border,
         range_vect       = cached_range_vect
@@ -459,8 +465,8 @@ estimate_abundance_batch <- function(
     cl,
     c("polygon", "ebird_zip", "sampling_txt", "wrapped_cov",
       "cache_dir", "grid_res_km", "hex_spacing_km", "peak_time",
-      "use_range", "botw_path", "botw_aliases", "range_resolution",
-      "border", "output_dir", "sci_lookup", "run_species"),
+      "use_range", "botw_path", "botw_aliases", "force_botw",
+      "range_resolution", "border", "output_dir", "sci_lookup", "run_species"),
     envir = environment()
   )
 
@@ -540,8 +546,8 @@ estimate_abundance_batch <- function(
           cl,
           c("polygon", "ebird_zip", "sampling_txt", "wrapped_cov",
             "cache_dir", "grid_res_km", "hex_spacing_km", "peak_time",
-            "use_range", "botw_path", "botw_aliases", "range_resolution",
-            "border", "output_dir", "sci_lookup", "run_species"),
+            "use_range", "botw_path", "botw_aliases", "force_botw",
+            "range_resolution", "border", "output_dir", "sci_lookup", "run_species"),
           envir = parent.env(environment())
         )
         lapply(chunk, function(sp) simpleError(conditionMessage(e)))

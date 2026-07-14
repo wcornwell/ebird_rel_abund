@@ -14,9 +14,13 @@ estimate_abundance(
   cache_dir = "ebirdabund_cache",
   grid_res_km = 1,
   hex_spacing_km = 5,
+  max_count = 200L,
+  peak_doy = NULL,
   peak_time = NULL,
   use_range = TRUE,
   botw_path = NULL,
+  botw_aliases = NULL,
+  force_botw = FALSE,
   range_resolution = "27km"
 )
 }
@@ -43,11 +47,18 @@ If \code{NULL} (default), \code{\link[=prepare_covariates]{prepare_covariates()}
 \item{hex_spacing_km}{Hex-cell diameter for spatiotemporal subsampling in
 km. Default \code{5}.}
 
+\item{max_count}{Upper cap on observation count (mega-flock filter).
+Default \code{200}.}
+
 \item{peak_time}{Optional decimal-hour override for observation start time
 used in predictions. Estimated from the model when \code{NULL}.}
 
 \item{use_range}{If \code{TRUE} (default), cells outside the eBird species range
 are set to \code{NA}. See \code{\link[=predict_species_map]{predict_species_map()}} for details.}
+
+\item{botw_aliases}{Optional data frame with columns \code{ebird_sci_name}
+and \code{botw_sci_name}, mapping species whose names differ between eBird
+and BirdLife. Forwarded to \code{\link[=load_range_botw]{load_range_botw()}}.}
 
 \item{range_resolution}{Resolution for \code{ebirdst::load_ranges}; \code{"27km"}
 (default) or \code{"9km"}.}

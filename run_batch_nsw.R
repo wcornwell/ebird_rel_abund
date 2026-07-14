@@ -44,6 +44,16 @@ botw_aliases <- if (file.exists(BOTW_ALIASES_FILE)) {
   NULL
 }
 
+# Species to mask with BOTW directly, skipping ebirdst (whose range under-covers
+# some inland/nomadic species — e.g. Eastern Cattle-Egret is clipped out of
+# inland NSW despite regular records). Common names, matched against the species
+# list. Set cfg$force_botw_species in the config to extend.
+FORCE_BOTW <- if (!is.null(cfg$force_botw_species)) {
+  unlist(cfg$force_botw_species)
+} else {
+  c("Eastern Cattle-Egret")
+}
+
 # Study polygon configuration
 STUDY_BBOX_COUNTRY <- cfg$study_polygon$country
 STUDY_BBOX_REGION  <- cfg$study_polygon$region
@@ -366,6 +376,7 @@ if (length(species_list) == 0) {
     grid_res_km  = GRID_RES_KM,
     botw_path    = BOTW_PATH,
     botw_aliases = botw_aliases,
+    force_botw   = FORCE_BOTW,
     border       = nsw,
     output_dir   = OUTPUT_DIR,
     log_file     = LOG_FILE,
