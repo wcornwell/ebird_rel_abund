@@ -12,17 +12,19 @@ species contributes 4 rows. 551 species × 4 = 2,204 rows.
 `ebirdabund/R/seasonality.R`. Study region: New South Wales + 100 km buffer,
 trained on eBird data from NSW, ACT, VIC, QLD, SA.
 
-**2026-07-10 patch:** `mean_abund`/`se_abund` for 22 species (previously `NA`
-due to the `protocol_type` reference-level bug — see CLAUDE.md's "protocol_type
-reference-level incident") were back-filled by
-`analysis/modeling/patch_seasonality_mean_abund.R`, which re-fits + predicts
-just those species under the fix and writes their region abundance into the
-existing rows; their seasonality metrics (columns 22–32) were untouched since
-those never depended on the buggy reference level. A full `run_batch_nsw.R`
-re-run is in progress to refresh `mean_abund`/`se_abund` for the remaining
-~394 already-"ok" species (their absolute abundance level was found to shift
-by roughly ±5–30%, not the seasonality shape) — treat those columns as
-provisional until that finishes.
+**2026-07-14 abundance re-join:** all `mean_abund`/`se_abund` values are now
+re-derived for **every** row directly from the current post-`protocol_type`-fix
+3 km abundance stack (`species_maps/nsw_abundance_stack_3km.tif`) by
+`analysis/modeling/rejoin_seasonality_abund.R` — a no-refit stack read that
+supersedes the earlier interim 22-species patch
+(`patch_seasonality_mean_abund.R`). This cleared the stale values the CSV
+previously carried from the pre-fix stack (`se_abund` max dropped 3022→532; the
+remainder are genuine edge-of-range extrapolation, not the protocol collapse).
+The seasonality metrics (columns 22–32) were untouched — they never depended on
+the abundance stack. The same re-join added the **`range_masked_in_rez`** flag
+(see the Abundance section). Eastern Cattle-Egret was additionally re-run with
+BOTW forced (its ebirdst range clipped inland NSW / the New England REZ despite
+66 records there); its row is now a real value rather than a masked `NA`.
 
 ---
 
